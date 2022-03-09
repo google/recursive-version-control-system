@@ -29,7 +29,7 @@ your entire file system.
 
 This is *experimental* and very much a work-in-progress.
 
-The functionality implemented so far is the `snapshot` command.
+The only functionality implemented so far is the `snapshot` command.
 
 ## Usage
 
@@ -41,11 +41,15 @@ rvcs snapshot <PATH>
 
 Publish the most recent snapshot of a file by signing it:
 
+**TODO: This is planned but not yet implemented!**
+
 ```shell
 rvcs publish <IDENTITY> <PATH>
 ```
 
 Merge in changes from the most recent snapshot signed by someone:
+
+**TODO: This is planned but not yet implemented!**
 
 ```shell
 rvcs merge <IDENTITY> <PATH>
@@ -74,6 +78,8 @@ corresponding snapshot.
 
 ## Signing Snapshots
 
+**TODO: This is planned but not yet implemented!**
+
 You share snapshots with others by "publishing" them. This consists of signing
 the snapshot by generating a signature for it tied to some identity you
 control.
@@ -86,6 +92,8 @@ That, in turn, is the primary extension mechanism for rvcs, as signature
 types can be defined to hold any data you want.
 
 ## Mirrors
+
+**TODO: This is planned but not yet implemented!**
 
 The rvcs tool also does not mandate a specific mechanism for copying snapshots
 between different machines, or among different users.
