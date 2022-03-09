@@ -21,6 +21,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -49,10 +50,16 @@ func (h *sha256Hash) HexContents() string {
 }
 
 func (h *sha256Hash) Equal(other Hash) bool {
+	if h == nil || other == nil {
+		return h == nil && other == nil
+	}
 	return h.Function() == other.Function() && h.HexContents() == other.HexContents()
 }
 
 func (h *sha256Hash) String() string {
+	if h == nil {
+		return ""
+	}
 	return h.Function() + ":" + h.Contents
 }
 
@@ -66,8 +73,11 @@ type Tree map[Path]Hash
 func (t Tree) String() string {
 	var lines []string
 	for p, h := range t {
-		encodedFileName := base64.RawStdEncoding.EncodeToString([]byte(p))
-		lines = append(lines, encodedFileName+" "+h.String())
+		if h != nil {
+			line := base64.RawStdEncoding.EncodeToString([]byte(p))
+			line = line + " " + h.String()
+			lines = append(lines, line)
+		}
 	}
 	sort.Strings(lines)
 	return strings.Join(lines, "\n")
@@ -84,9 +94,15 @@ func (f *File) IsDir() bool {
 }
 
 func (f *File) String() string {
-	lines := []string{f.Mode, f.Contents.String()}
+	var contentsStr string
+	if f.Contents != nil {
+		contentsStr = f.Contents.String()
+	}
+	lines := []string{f.Mode, contentsStr}
 	for _, parent := range f.Parents {
-		lines = append(lines, parent.String())
+		if parent != nil {
+			lines = append(lines, parent.String())
+		}
 	}
 	return strings.Join(lines, "\n")
 }
@@ -102,10 +118,13 @@ func ParseFile(reader io.Reader) (*File, error) {
 	}
 	var hashes []Hash
 	for _, line := range lines[1:] {
-		if !strings.HasPrefix(line, "sha256:") {
+		var hash Hash
+		if strings.HasPrefix(line, "sha256:") {
+			hash = &sha256Hash{strings.TrimPrefix(line, "sha256:")}
+		} else if line != "" {
 			return nil, fmt.Errorf("unsupported hash function for %q", line)
 		}
-		hashes = append(hashes, &sha256Hash{strings.TrimPrefix(line, "sha256:")})
+		hashes = append(hashes, hash)
 	}
 	f := &File{
 		Mode:     lines[0],
@@ -129,9 +148,12 @@ func SnapshotFileMetadata(ctx context.Context, a Archiver, p Path, info os.FileI
 	if err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("failure looking up the previous file snapshot: %v", err)
 	}
-	if prev != nil && prev.Contents.String() == contentsHash.String() && prev.Mode == modeLine {
-		// The file is unchanged from the last snapshot...
-		return prevFileHash, nil
+	if prev != nil && prev.Mode == modeLine {
+		if (prev.Contents == nil && contentsHash == nil) ||
+			(prev.Contents != nil && prev.Contents.Equal(contentsHash)) {
+			// The file is unchanged from the last snapshot...
+			return prevFileHash, nil
+		}
 	}
 	f := &File{
 		Contents: contentsHash,
@@ -177,8 +199,45 @@ func SnapshotDirectory(ctx context.Context, a Archiver, p Path, info os.FileInfo
 	return SnapshotFileMetadata(ctx, a, p, info, contentsHash)
 }
 
+func SnapshotLink(ctx context.Context, a Archiver, p Path, info os.FileInfo) (Hash, error) {
+	parent := filepath.Dir(string(p))
+	target, err := os.Readlink(string(p))
+	if err != nil {
+		return nil, fmt.Errorf("failure reading the link target for %q: %v", p, err)
+	}
+	absoluteTarget, err := filepath.Abs(filepath.Join(parent, target))
+	if err != nil {
+		return nil, fmt.Errorf("failure resolving the absolute file path for target %q: %v", target, err)
+	}
+	targetHash, err := Snapshot(ctx, a, Path(absoluteTarget))
+	if err != nil {
+		return nil, fmt.Errorf("failure reading the link target for %q: %v", p, err)
+	}
+	return SnapshotFileMetadata(ctx, a, p, info, targetHash)
+}
+
 func Snapshot(ctx context.Context, a Archiver, p Path) (Hash, error) {
+	stat, err := os.Lstat(string(p))
+	if os.IsNotExist(err) {
+		// The referenced file does not exist, so the corresponding
+		// hash should be nil.
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failure reading the file stat for %q: %v", p, err)
+	}
+	if stat.Mode()&fs.ModeSymlink != 0 {
+		return SnapshotLink(ctx, a, p, stat)
+	}
 	contents, err := os.Open(string(p))
+	if os.IsNotExist(err) {
+		// The file we tried to open no longer exists.
+		//
+		// This could happen if there is a race condition where the
+		// file was deleted before we could read it. In that case,
+		// return an empty contents.
+		return nil, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failure reading the file %q: %v", p, err)
 	}
@@ -308,6 +367,8 @@ func main() {
 	ctx := context.Background()
 	if h, err := Snapshot(ctx, a, Path(path)); err != nil {
 		log.Fatalf("Failure snapshotting the directory %q: %v\n", path, err)
+	} else if h == nil {
+		fmt.Printf("Did not generate a snapshot as %q does not exist\n", path)
 	} else {
 		fmt.Printf("Snapshotted %q to %q\n", path, h)
 	}
