@@ -188,7 +188,7 @@ func SnapshotDirectory(ctx context.Context, a Archiver, p Path, info os.FileInfo
 		if a.Exclude(childPath) {
 			continue
 		}
-		childHash, err := Snapshot(ctx, a, childPath)
+		childHash, err := Snapshot(ctx, a, childPath, make(map[string]string))
 		if err != nil {
 			return nil, fmt.Errorf("failure hashing the child dir %q: %v", childPath, err)
 		}
@@ -199,8 +199,12 @@ func SnapshotDirectory(ctx context.Context, a Archiver, p Path, info os.FileInfo
 	return SnapshotFileMetadata(ctx, a, p, info, contentsHash)
 }
 
-func SnapshotLink(ctx context.Context, a Archiver, p Path, info os.FileInfo) (Hash, error) {
+func SnapshotLink(ctx context.Context, a Archiver, p Path, info os.FileInfo, visitedLinks map[string]string) (Hash, error) {
 	parent := filepath.Dir(string(p))
+	if _, ok := visitedLinks[parent]; ok {
+		// We've found a cycle of links... stop processing them.
+		return nil, nil
+	}
 	target, err := os.Readlink(string(p))
 	if err != nil {
 		return nil, fmt.Errorf("failure reading the link target for %q: %v", p, err)
@@ -209,14 +213,15 @@ func SnapshotLink(ctx context.Context, a Archiver, p Path, info os.FileInfo) (Ha
 	if err != nil {
 		return nil, fmt.Errorf("failure resolving the absolute file path for target %q: %v", target, err)
 	}
-	targetHash, err := Snapshot(ctx, a, Path(absoluteTarget))
+	visitedLinks[parent] = absoluteTarget
+	targetHash, err := Snapshot(ctx, a, Path(absoluteTarget), visitedLinks)
 	if err != nil {
 		return nil, fmt.Errorf("failure reading the link target for %q: %v", p, err)
 	}
 	return SnapshotFileMetadata(ctx, a, p, info, targetHash)
 }
 
-func Snapshot(ctx context.Context, a Archiver, p Path) (Hash, error) {
+func Snapshot(ctx context.Context, a Archiver, p Path, visitedLinks map[string]string) (Hash, error) {
 	stat, err := os.Lstat(string(p))
 	if os.IsNotExist(err) {
 		// The referenced file does not exist, so the corresponding
@@ -227,7 +232,7 @@ func Snapshot(ctx context.Context, a Archiver, p Path) (Hash, error) {
 		return nil, fmt.Errorf("failure reading the file stat for %q: %v", p, err)
 	}
 	if stat.Mode()&fs.ModeSymlink != 0 {
-		return SnapshotLink(ctx, a, p, stat)
+		return SnapshotLink(ctx, a, p, stat, visitedLinks)
 	}
 	contents, err := os.Open(string(p))
 	if os.IsNotExist(err) {
@@ -365,7 +370,7 @@ func main() {
 	}
 	a := &archiver{filepath.Join(home, ".archive")}
 	ctx := context.Background()
-	if h, err := Snapshot(ctx, a, Path(path)); err != nil {
+	if h, err := Snapshot(ctx, a, Path(path), make(map[string]string)); err != nil {
 		log.Fatalf("Failure snapshotting the directory %q: %v\n", path, err)
 	} else if h == nil {
 		fmt.Printf("Did not generate a snapshot as %q does not exist\n", path)
