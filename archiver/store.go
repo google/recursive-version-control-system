@@ -23,6 +23,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/googlestaging/recursive-version-control-system/snapshot"
 )
@@ -39,8 +41,17 @@ func (s *Store) Exclude(p snapshot.Path) bool {
 	return p == snapshot.Path(s.ArchiveDir)
 }
 
+func (s *Store) tmpFile(ctx context.Context) (*os.File, error) {
+	tmpDir := filepath.Join(s.ArchiveDir, "tmp")
+	if err := os.MkdirAll(tmpDir, os.FileMode(0700)); err != nil {
+		return nil, fmt.Errorf("failure creating the tmp dir: %v", err)
+	}
+	return os.CreateTemp(tmpDir, "archiver")
+}
+
 func (s *Store) StoreObject(ctx context.Context, reader io.Reader) (h *snapshot.Hash, err error) {
-	tmp, err := os.CreateTemp("", "archiver")
+	var tmp *os.File
+	tmp, err = s.tmpFile(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failure creating a temp file: %v", err)
 	}
@@ -136,4 +147,74 @@ func (s *Store) ReadFile(ctx context.Context, p snapshot.Path) (*snapshot.Hash, 
 		return nil, nil, fmt.Errorf("failure parsing the file snapshot for %q: %v", p, err)
 	}
 	return h, f, nil
+}
+
+type cachedInfo struct {
+	Size    int64
+	Mode    os.FileMode
+	ModTime time.Time
+	Ino     uint64
+}
+
+func (s *Store) pathCacheFile(p snapshot.Path) (dir string, name string) {
+	pathHash := &snapshot.Hash{
+		Function:    "sha256",
+		HexContents: fmt.Sprintf("%x", sha256.Sum256([]byte(p))),
+	}
+	return objectName(pathHash, filepath.Join(s.ArchiveDir, "cache"))
+}
+
+func (s *Store) CachePathInfo(ctx context.Context, p snapshot.Path, info os.FileInfo) error {
+	sysInfo := info.Sys()
+	if sysInfo == nil {
+		return nil
+	}
+	unix_info, ok := sysInfo.(*syscall.Stat_t)
+	if !ok || unix_info == nil {
+		return nil
+	}
+	ino := unix_info.Ino
+
+	cacheDir, cacheFile := s.pathCacheFile(p)
+	cachePath := filepath.Join(cacheDir, cacheFile)
+	if err := os.MkdirAll(cacheDir, 0700); err != nil {
+		return fmt.Errorf("failure creating the cache dir for %q: %v", p, err)
+	}
+	if err := os.Remove(cachePath); !os.IsNotExist(err) {
+		return fmt.Errorf("failure removing the old cache entry for %q: %v", p, err)
+	}
+
+	newInfo := fmt.Sprintf("%+v", &cachedInfo{
+		Size:    info.Size(),
+		Mode:    info.Mode(),
+		ModTime: info.ModTime(),
+		Ino:     ino,
+	})
+	return os.WriteFile(cachePath, []byte(newInfo), 0700)
+}
+
+func (s *Store) PathInfoMatchesCache(ctx context.Context, p snapshot.Path, info os.FileInfo) bool {
+	sysInfo := info.Sys()
+	if sysInfo == nil {
+		return false
+	}
+	unix_info, ok := sysInfo.(*syscall.Stat_t)
+	if !ok || unix_info == nil {
+		return false
+	}
+	ino := unix_info.Ino
+	cacheDir, cacheFile := s.pathCacheFile(p)
+	bs, err := os.ReadFile(filepath.Join(cacheDir, cacheFile))
+	if err != nil {
+		return false
+	}
+	cachedInfoStr := string(bs)
+
+	newInfo := fmt.Sprintf("%+v", &cachedInfo{
+		Size:    info.Size(),
+		Mode:    info.Mode(),
+		ModTime: info.ModTime(),
+		Ino:     ino,
+	})
+	return cachedInfoStr == newInfo
 }

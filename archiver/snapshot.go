@@ -50,8 +50,27 @@ func snapshotFileMetadata(ctx context.Context, s *Store, p snapshot.Path, info o
 	return h, nil
 }
 
-func snapshotRegularFile(ctx context.Context, s *Store, p snapshot.Path, info os.FileInfo, contents io.Reader) (*snapshot.Hash, error) {
-	h, err := s.StoreObject(ctx, contents)
+func readCached(ctx context.Context, s *Store, p snapshot.Path, info os.FileInfo) (*snapshot.Hash, bool) {
+	if !s.PathInfoMatchesCache(ctx, p, info) {
+		return nil, false
+	}
+	cachedHash, _, err := s.ReadFile(ctx, p)
+	if err != nil {
+		return nil, false
+	}
+	return cachedHash, true
+}
+
+func snapshotRegularFile(ctx context.Context, s *Store, p snapshot.Path, info os.FileInfo, contents io.Reader) (h *snapshot.Hash, err error) {
+	if cached, ok := readCached(ctx, s, p, info); ok {
+		return cached, nil
+	}
+	defer func() {
+		if err == nil && h != nil {
+			s.CachePathInfo(ctx, p, info)
+		}
+	}()
+	h, err = s.StoreObject(ctx, contents)
 	if err != nil {
 		return nil, fmt.Errorf("failure storing an object: %v", err)
 	}
