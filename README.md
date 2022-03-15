@@ -12,9 +12,12 @@ This is not an officially supported Google product.
 
 ## Overview
 
-The recursive version control system (rvcs) keeps track the version history
-of individual files and directories. For a directory, this history includes
-the histories of all the files in that directory.
+The recursive version control system (rvcs) tracks the version history of
+individual files and directories. For a directory, this history includes the
+histories of all the files in that directory.
+
+That hierarchical structure means you can share your files at any level
+and can share different files/directories with different audiences.
 
 To share a file with others, you publish it by signing its history.
 
