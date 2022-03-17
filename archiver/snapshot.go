@@ -22,6 +22,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/googlestaging/recursive-version-control-system/snapshot"
 )
@@ -99,29 +100,25 @@ func snapshotDirectory(ctx context.Context, s *Store, p snapshot.Path, info os.F
 	return snapshotFileMetadata(ctx, s, p, info, contentsHash)
 }
 
-func snapshotLink(ctx context.Context, s *Store, p snapshot.Path, info os.FileInfo, visitedLinks map[string]string) (*snapshot.Hash, error) {
-	parent := filepath.Dir(string(p))
-	if _, ok := visitedLinks[parent]; ok {
-		// We've found a cycle of links... stop processing them.
-		return nil, nil
-	}
+func snapshotLink(ctx context.Context, s *Store, p snapshot.Path, info os.FileInfo) (*snapshot.Hash, error) {
 	target, err := os.Readlink(string(p))
 	if err != nil {
 		return nil, fmt.Errorf("failure reading the link target for %q: %v", p, err)
 	}
-	absoluteTarget, err := filepath.Abs(filepath.Join(parent, target))
+
+	h, err := s.StoreObject(ctx, strings.NewReader(target))
 	if err != nil {
-		return nil, fmt.Errorf("failure resolving the absolute file path for target %q: %v", target, err)
+		return nil, fmt.Errorf("failure storing an object: %v", err)
 	}
-	visitedLinks[parent] = absoluteTarget
-	targetHash, err := snapshotRec(ctx, s, snapshot.Path(absoluteTarget), visitedLinks)
-	if err != nil {
-		return nil, fmt.Errorf("failure reading the link target for %q: %v", p, err)
-	}
-	return snapshotFileMetadata(ctx, s, p, info, targetHash)
+	return snapshotFileMetadata(ctx, s, p, info, h)
 }
 
-func snapshotRec(ctx context.Context, s *Store, p snapshot.Path, visitedLinks map[string]string) (*snapshot.Hash, error) {
+// Snapshot generates a snapshot for the given path, stored in the given store.
+//
+// The passed in path must be an absolute path.
+//
+// The returned value is the hash of the generated `snapshot.File` object.
+func Snapshot(ctx context.Context, s *Store, p snapshot.Path) (*snapshot.Hash, error) {
 	stat, err := os.Lstat(string(p))
 	if os.IsNotExist(err) {
 		// The referenced file does not exist, so the corresponding
@@ -132,7 +129,7 @@ func snapshotRec(ctx context.Context, s *Store, p snapshot.Path, visitedLinks ma
 		return nil, fmt.Errorf("failure reading the file stat for %q: %v", p, err)
 	}
 	if stat.Mode()&fs.ModeSymlink != 0 {
-		return snapshotLink(ctx, s, p, stat, visitedLinks)
+		return snapshotLink(ctx, s, p, stat)
 	}
 	contents, err := os.Open(string(p))
 	if os.IsNotExist(err) {
@@ -157,13 +154,4 @@ func snapshotRec(ctx context.Context, s *Store, p snapshot.Path, visitedLinks ma
 	} else {
 		return snapshotRegularFile(ctx, s, p, info, contents)
 	}
-}
-
-// Snapshot generates a snapshot for the given path, stored in the given store.
-//
-// The passed in path must be an absolute path.
-//
-// The returned value is the hash of the generated `snapshot.File` object.
-func Snapshot(ctx context.Context, s *Store, p snapshot.Path) (*snapshot.Hash, error) {
-	return snapshotRec(ctx, s, p, make(map[string]string))
 }
