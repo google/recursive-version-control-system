@@ -12,26 +12,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
+// Package command defines the command line interface for rvcs
+package command
 
 import (
 	"context"
-	"log"
-	"os"
-	"path/filepath"
+	"fmt"
 
 	"github.com/googlestaging/recursive-version-control-system/archive"
-	"github.com/googlestaging/recursive-version-control-system/command"
+	"github.com/googlestaging/recursive-version-control-system/snapshot"
 )
 
-func main() {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		log.Fatalf("failure resolving the user's home dir: %v\n", err)
+func logCommand(ctx context.Context, s *archive.Store, cmd string, args []string) (int, error) {
+	if len(args) != 1 {
+		fmt.Printf("Usage: %q log <HASH>\n", cmd)
+		return 1, nil
 	}
-	s := &archive.Store{filepath.Join(home, ".archive")}
-	ctx := context.Background()
-
-	ret := command.Run(ctx, s, os.Args)
-	os.Exit(ret)
+	h, err := snapshot.ParseHash(args[0])
+	if err != nil {
+		return 1, fmt.Errorf("failure parsing the hash %q: %v", args[0], err)
+	}
+	entries, err := archive.ReadLog(ctx, s, h)
+	if err != nil {
+		return 1, fmt.Errorf("failure reading the log for %q: %v", args[0], err)
+	}
+	for _, e := range entries[1:] {
+		fmt.Printf("%s\n", e.Hash)
+	}
+	return 0, nil
 }

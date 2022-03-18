@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package archiver
+package archive
 
 import (
 	"bytes"
@@ -119,7 +119,24 @@ func (s *Store) StoreFile(ctx context.Context, p snapshot.Path, f *snapshot.File
 	return h, nil
 }
 
-func (s *Store) ReadFile(ctx context.Context, p snapshot.Path) (*snapshot.Hash, *snapshot.File, error) {
+func (s *Store) ReadFile(ctx context.Context, h *snapshot.Hash) (*snapshot.File, error) {
+	reader, err := s.ReadObject(ctx, h)
+	if err != nil {
+		return nil, fmt.Errorf("failure looking up the file snapshot for %q: %v", h, err)
+	}
+	defer reader.Close()
+	contents, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, fmt.Errorf("failure reading file metadata from the reader: %v", err)
+	}
+	f, err := snapshot.ParseFile(string(contents))
+	if err != nil {
+		return nil, fmt.Errorf("failure parsing the file snapshot for %q: %v", h, err)
+	}
+	return f, nil
+}
+
+func (s *Store) FindFile(ctx context.Context, p snapshot.Path) (*snapshot.Hash, *snapshot.File, error) {
 	pathHashDir, pathHashFile := s.pathHashFile(p)
 	bs, err := os.ReadFile(filepath.Join(pathHashDir, pathHashFile))
 	if err != nil {
@@ -133,18 +150,9 @@ func (s *Store) ReadFile(ctx context.Context, p snapshot.Path) (*snapshot.Hash, 
 		Function:    "sha256",
 		HexContents: strings.TrimPrefix(fileHashStr, "sha256:"),
 	}
-	reader, err := s.ReadObject(ctx, h)
+	f, err := s.ReadFile(ctx, h)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failure looking up the file snapshot for %q: %v", p, err)
-	}
-	defer reader.Close()
-	contents, err := io.ReadAll(reader)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failure reading file metadata from the reader: %v", err)
-	}
-	f, err := snapshot.ParseFile(string(contents))
-	if err != nil {
-		return nil, nil, fmt.Errorf("failure parsing the file snapshot for %q: %v", p, err)
+		return nil, nil, fmt.Errorf("failure reading the file snapshot for %q: %v", h, err)
 	}
 	return h, f, nil
 }
