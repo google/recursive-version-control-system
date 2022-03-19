@@ -36,8 +36,22 @@ func logCommand(ctx context.Context, s *archive.Store, cmd string, args []string
 	if err != nil {
 		return 1, fmt.Errorf("failure reading the log for %q: %v", args[0], err)
 	}
-	for _, e := range entries[1:] {
-		fmt.Printf("%s\n", e.Hash)
+	summaries, err := archive.SummarizeLog(ctx, s, entries)
+	if err != nil {
+		return 1, fmt.Errorf("failure summarizing log entries for %q: %v", args[0], err)
+	}
+	for i, e := range entries {
+		if i > 0 {
+			// Separate log entries for each change with a newline to make the output more readable.
+			fmt.Println()
+		}
+		summary, ok := summaries[*e.Hash]
+		if !ok {
+			return 1, fmt.Errorf("internal error reading log summaries: entry %q is missing", e.Hash)
+		}
+		for _, line := range summary {
+			fmt.Println(line)
+		}
 	}
 	return 0, nil
 }

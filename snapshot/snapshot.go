@@ -112,6 +112,9 @@ func ParseTree(encoded string) (Tree, error) {
 	t := make(Tree)
 	lines := strings.Split(encoded, "\n")
 	for _, line := range lines {
+		if len(line) == 0 {
+			continue
+		}
 		parts := strings.SplitN(line, " ", 2)
 		if len(parts) != 2 {
 			return nil, fmt.Errorf("malformed entry %q in encoded tree %q", line, encoded)
