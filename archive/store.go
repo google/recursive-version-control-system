@@ -103,7 +103,7 @@ func (s *Store) pathHashFile(p snapshot.Path) (dir string, name string) {
 	return objectName(pathHash, filepath.Join(s.ArchiveDir, "paths"))
 }
 
-func (s *Store) StoreFile(ctx context.Context, p snapshot.Path, f *snapshot.File) (*snapshot.Hash, error) {
+func (s *Store) StoreSnapshot(ctx context.Context, p snapshot.Path, f *snapshot.File) (*snapshot.Hash, error) {
 	bs := []byte(f.String())
 	h, err := s.StoreObject(ctx, bytes.NewReader(bs))
 	if err != nil {
@@ -119,7 +119,7 @@ func (s *Store) StoreFile(ctx context.Context, p snapshot.Path, f *snapshot.File
 	return h, nil
 }
 
-func (s *Store) ReadFile(ctx context.Context, h *snapshot.Hash) (*snapshot.File, error) {
+func (s *Store) ReadSnapshot(ctx context.Context, h *snapshot.Hash) (*snapshot.File, error) {
 	reader, err := s.ReadObject(ctx, h)
 	if err != nil {
 		return nil, fmt.Errorf("failure looking up the file snapshot for %q: %v", h, err)
@@ -136,7 +136,7 @@ func (s *Store) ReadFile(ctx context.Context, h *snapshot.Hash) (*snapshot.File,
 	return f, nil
 }
 
-func (s *Store) FindFile(ctx context.Context, p snapshot.Path) (*snapshot.Hash, *snapshot.File, error) {
+func (s *Store) FindSnapshot(ctx context.Context, p snapshot.Path) (*snapshot.Hash, *snapshot.File, error) {
 	pathHashDir, pathHashFile := s.pathHashFile(p)
 	bs, err := os.ReadFile(filepath.Join(pathHashDir, pathHashFile))
 	if err != nil {
@@ -150,11 +150,62 @@ func (s *Store) FindFile(ctx context.Context, p snapshot.Path) (*snapshot.Hash, 
 		Function:    "sha256",
 		HexContents: strings.TrimPrefix(fileHashStr, "sha256:"),
 	}
-	f, err := s.ReadFile(ctx, h)
+	f, err := s.ReadSnapshot(ctx, h)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failure reading the file snapshot for %q: %v", h, err)
 	}
 	return h, f, nil
+}
+
+// ListDirectorySnapshotContents returns the parsed `*snapshot.Tree` object listing the contents of `f`.
+//
+// The supplied `*snapshot.File` object must correspond to a directory.
+func (s *Store) ListDirectorySnapshotContents(ctx context.Context, h *snapshot.Hash, f *snapshot.File) (snapshot.Tree, error) {
+	if !f.IsDir() {
+		return nil, fmt.Errorf("%q is not the snapshot of a directory", h)
+	}
+	contentsReader, err := s.ReadObject(ctx, f.Contents)
+	if err != nil {
+		return nil, fmt.Errorf("failure opening the contents of %q: %v", h, err)
+	}
+	contents, err := io.ReadAll(contentsReader)
+	if err != nil {
+		return nil, fmt.Errorf("failure reading the contents of %q: %v", h, err)
+	}
+	tree, err := snapshot.ParseTree(string(contents))
+	if err != nil {
+		return nil, fmt.Errorf("failure parsing the directory contents of the snapshot %q: %v", h, err)
+	}
+	return tree, nil
+}
+
+func (s *Store) RemoveMappingForPath(ctx context.Context, p snapshot.Path) error {
+	h, f, err := s.FindSnapshot(ctx, p)
+	if os.IsNotExist(err) {
+		// There is no file snapshot corresponding to the given path,
+		// so we have nothing to do.
+		return nil
+	}
+
+	pathHashDir, pathHashFile := s.pathHashFile(p)
+	mappingPath := filepath.Join(pathHashDir, pathHashFile)
+	if err := os.Remove(mappingPath); err != nil {
+		return fmt.Errorf("failure removing the mapping from %q to %q: %v", p, h, err)
+	}
+	if !f.IsDir() {
+		return nil
+	}
+	tree, err := s.ListDirectorySnapshotContents(ctx, h, f)
+	if err != nil {
+		return fmt.Errorf("failure listing the contents of %q: %v", h, err)
+	}
+	for child, _ := range tree {
+		childPath := p.Join(child)
+		if err := s.RemoveMappingForPath(ctx, childPath); err != nil {
+			return fmt.Errorf("failure removing mapping for the child path %q: %v", child, err)
+		}
+	}
+	return nil
 }
 
 type cachedInfo struct {

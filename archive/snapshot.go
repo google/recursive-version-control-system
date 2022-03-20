@@ -32,7 +32,7 @@ import (
 
 func snapshotFileMetadata(ctx context.Context, s *Store, p snapshot.Path, info os.FileInfo, contentsHash *snapshot.Hash) (*snapshot.Hash, error) {
 	modeLine := info.Mode().String()
-	prevFileHash, prev, err := s.FindFile(ctx, p)
+	prevFileHash, prev, err := s.FindSnapshot(ctx, p)
 	if err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("failure looking up the previous file snapshot: %v", err)
 	}
@@ -47,9 +47,30 @@ func snapshotFileMetadata(ctx context.Context, s *Store, p snapshot.Path, info o
 	if prev != nil {
 		f.Parents = []*snapshot.Hash{prevFileHash}
 	}
-	h, err := s.StoreFile(ctx, p, f)
+	h, err := s.StoreSnapshot(ctx, p, f)
 	if err != nil {
 		return nil, fmt.Errorf("failure saving the latest file metadata for %q: %v", p, err)
+	}
+	if !prev.IsDir() {
+		return h, nil
+	}
+	// The previous snapshot was a directory, so we need to remove path
+	// mappings for any children that were removed.
+	prevTree, err := s.ListDirectorySnapshotContents(ctx, prevFileHash, prev)
+	if err != nil {
+		return nil, fmt.Errorf("failure listing the contents of the previous snapshot: %v", err)
+	}
+	currTree, err := s.ListDirectorySnapshotContents(ctx, h, f)
+	if err != nil {
+		return nil, fmt.Errorf("failure listing the contents of the new snapshot: %v", err)
+	}
+	for child, _ := range prevTree {
+		if _, ok := currTree[child]; !ok {
+			// The previous child entry was removed.
+			if err := s.RemoveMappingForPath(ctx, p.Join(child)); err != nil {
+				return nil, fmt.Errorf("failure removing path mapping for removed child %q: %v", child, err)
+			}
+		}
 	}
 	return h, nil
 }
@@ -58,7 +79,7 @@ func readCached(ctx context.Context, s *Store, p snapshot.Path, info os.FileInfo
 	if !s.PathInfoMatchesCache(ctx, p, info) {
 		return nil, false
 	}
-	cachedHash, _, err := s.FindFile(ctx, p)
+	cachedHash, _, err := s.FindSnapshot(ctx, p)
 	if err != nil {
 		return nil, false
 	}
@@ -188,23 +209,12 @@ type LogEntry struct {
 }
 
 func dirContents(ctx context.Context, s *Store, h *snapshot.Hash, f *snapshot.File, subpath string, includeDirectories bool, contentsMap map[string]*snapshot.Hash) error {
-	if !f.IsDir() {
-		return fmt.Errorf("%q is not the snapshot of a directory", h)
-	}
-	contentsReader, err := s.ReadObject(ctx, f.Contents)
+	tree, err := s.ListDirectorySnapshotContents(ctx, h, f)
 	if err != nil {
-		return fmt.Errorf("failure opening the contents of %q: %v", h, err)
-	}
-	contents, err := io.ReadAll(contentsReader)
-	if err != nil {
-		return fmt.Errorf("failure reading the contents of %q: %v", h, err)
-	}
-	tree, err := snapshot.ParseTree(string(contents))
-	if err != nil {
-		return fmt.Errorf("failure parsing the directory contents of the snapshot %q: %v", h, err)
+		return fmt.Errorf("failure listing the directory contents of the snapshot %q: %v", h, err)
 	}
 	for p, ph := range tree {
-		child, err := s.ReadFile(ctx, ph)
+		child, err := s.ReadSnapshot(ctx, ph)
 		if err != nil {
 			return fmt.Errorf("failure reading the file snapshot for %q: %v", p, err)
 		}
@@ -335,7 +345,7 @@ func ReadLog(ctx context.Context, s *Store, h *snapshot.Hash) ([]*LogEntry, erro
 	result := []*LogEntry{}
 	for len(queue) > 0 {
 		h, queue = queue[0], queue[1:]
-		f, err := s.ReadFile(ctx, h)
+		f, err := s.ReadSnapshot(ctx, h)
 		if err != nil {
 			return nil, fmt.Errorf("failure reading the snapshot for %q: %v", h, err)
 		}
