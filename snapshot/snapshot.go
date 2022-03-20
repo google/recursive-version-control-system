@@ -18,6 +18,7 @@ package snapshot
 import (
 	"encoding/base64"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -71,6 +72,11 @@ func ParseHash(str string) (*Hash, error) {
 //
 // This can be either an absolute or relative path.
 type Path string
+
+// Join returns the path corresponding to joining this path with the supplied child path.
+func (p Path) Join(child Path) Path {
+	return Path(filepath.Join(string(p), string(child)))
+}
 
 func (p Path) encode() string {
 	return base64.RawStdEncoding.EncodeToString([]byte(p))
@@ -169,11 +175,17 @@ type File struct {
 
 // IsDir reports whether or not the file is the snapshot of a directory.
 func (f *File) IsDir() bool {
+	if f == nil {
+		return false
+	}
 	return strings.HasPrefix(f.Mode, "d")
 }
 
 // IsLink reports whether or not the file is the snapshot of a symbolic link.
 func (f *File) IsLink() bool {
+	if f == nil {
+		return false
+	}
 	return strings.HasPrefix(f.Mode, "L")
 }
 
@@ -181,6 +193,9 @@ func (f *File) IsLink() bool {
 //
 // The resulting value is suitable for serialization.
 func (f *File) String() string {
+	if f == nil {
+		return ""
+	}
 	var contentsStr string
 	if f.Contents != nil {
 		contentsStr = f.Contents.String()
