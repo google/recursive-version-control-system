@@ -29,7 +29,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("failure resolving the user's home dir: %v\n", err)
 	}
-	s := &archive.Store{filepath.Join(home, ".archive")}
+	s := &archive.Store{filepath.Join(home, ".rvcs/archive")}
 	ctx := context.Background()
 
 	ret := command.Run(ctx, s, os.Args)
