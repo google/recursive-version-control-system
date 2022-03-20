@@ -20,7 +20,6 @@ import (
 	"fmt"
 
 	"github.com/googlestaging/recursive-version-control-system/archive"
-	"github.com/googlestaging/recursive-version-control-system/snapshot"
 )
 
 func logCommand(ctx context.Context, s *archive.Store, cmd string, args []string) (int, error) {
@@ -28,9 +27,9 @@ func logCommand(ctx context.Context, s *archive.Store, cmd string, args []string
 		fmt.Printf("Usage: %q log <HASH>\n", cmd)
 		return 1, nil
 	}
-	h, err := snapshot.ParseHash(args[0])
+	h, err := resolveSnapshot(ctx, s, args[0])
 	if err != nil {
-		return 1, fmt.Errorf("failure parsing the hash %q: %v", args[0], err)
+		return 1, fmt.Errorf("failure resolving the snapshot hash for %q: %v", args[0], err)
 	}
 	entries, err := archive.ReadLog(ctx, s, h)
 	if err != nil {

@@ -17,7 +17,6 @@ package archive
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"fmt"
 	"io"
 	"os"
@@ -56,19 +55,15 @@ func (s *Store) StoreObject(ctx context.Context, reader io.Reader) (h *snapshot.
 		return nil, fmt.Errorf("failure creating a temp file: %v", err)
 	}
 	defer func() {
+		tmp.Close()
 		if err != nil {
 			os.Remove(tmp.Name())
 		}
 	}()
 	reader = io.TeeReader(reader, tmp)
-	sum := sha256.New()
-	if _, err := io.Copy(sum, reader); err != nil {
+	h, err = snapshot.NewHash(reader)
+	if err != nil {
 		return nil, fmt.Errorf("failure hashing an object: %v", err)
-	}
-	tmp.Close()
-	h = &snapshot.Hash{
-		Function:    "sha256",
-		HexContents: fmt.Sprintf("%x", sum.Sum(nil)),
 	}
 	objPath, objName := objectName(h, filepath.Join(s.ArchiveDir, "objects"))
 	if err := os.MkdirAll(objPath, os.FileMode(0700)); err != nil {
@@ -81,13 +76,13 @@ func (s *Store) StoreObject(ctx context.Context, reader io.Reader) (h *snapshot.
 }
 
 func objectName(h *snapshot.Hash, parentDir string) (dir string, name string) {
-	functionDir := filepath.Join(parentDir, h.Function)
-	if len(h.HexContents) > 4 {
-		return filepath.Join(functionDir, h.HexContents[0:2], h.HexContents[2:4]), h.HexContents[4:]
-	} else if len(h.HexContents) > 2 {
-		return filepath.Join(functionDir, h.HexContents[0:2]), h.HexContents[2:]
+	functionDir := filepath.Join(parentDir, h.Function())
+	if len(h.HexContents()) > 4 {
+		return filepath.Join(functionDir, h.HexContents()[0:2], h.HexContents()[2:4]), h.HexContents()[4:]
+	} else if len(h.HexContents()) > 2 {
+		return filepath.Join(functionDir, h.HexContents()[0:2]), h.HexContents()[2:]
 	}
-	return functionDir, h.HexContents
+	return functionDir, h.HexContents()
 }
 
 func (s *Store) ReadObject(ctx context.Context, h *snapshot.Hash) (io.ReadCloser, error) {
@@ -95,12 +90,13 @@ func (s *Store) ReadObject(ctx context.Context, h *snapshot.Hash) (io.ReadCloser
 	return os.Open(filepath.Join(objPath, objName))
 }
 
-func (s *Store) pathHashFile(p snapshot.Path) (dir string, name string) {
-	pathHash := &snapshot.Hash{
-		Function:    "sha256",
-		HexContents: fmt.Sprintf("%x", sha256.Sum256([]byte(p))),
+func (s *Store) pathHashFile(p snapshot.Path) (dir string, name string, err error) {
+	pathHash, err := snapshot.NewHash(strings.NewReader(string(p)))
+	if err != nil {
+		return "", "", fmt.Errorf("failure hashing the path name %q: %v", p, err)
 	}
-	return objectName(pathHash, filepath.Join(s.ArchiveDir, "paths"))
+	dir, name = objectName(pathHash, filepath.Join(s.ArchiveDir, "paths"))
+	return dir, name, nil
 }
 
 func (s *Store) StoreSnapshot(ctx context.Context, p snapshot.Path, f *snapshot.File) (*snapshot.Hash, error) {
@@ -109,7 +105,10 @@ func (s *Store) StoreSnapshot(ctx context.Context, p snapshot.Path, f *snapshot.
 	if err != nil {
 		return nil, fmt.Errorf("failure saving file metadata for %+v: %v", f, err)
 	}
-	pathHashDir, pathHashFile := s.pathHashFile(p)
+	pathHashDir, pathHashFile, err := s.pathHashFile(p)
+	if err != nil {
+		return nil, fmt.Errorf("failure calculating the path hash file location for %q: %v", p, err)
+	}
 	if err := os.MkdirAll(pathHashDir, 0700); err != nil {
 		return nil, fmt.Errorf("failure creating the paths dir for %q: %v", p, err)
 	}
@@ -137,18 +136,18 @@ func (s *Store) ReadSnapshot(ctx context.Context, h *snapshot.Hash) (*snapshot.F
 }
 
 func (s *Store) FindSnapshot(ctx context.Context, p snapshot.Path) (*snapshot.Hash, *snapshot.File, error) {
-	pathHashDir, pathHashFile := s.pathHashFile(p)
+	pathHashDir, pathHashFile, err := s.pathHashFile(p)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failure calculating the path hash file location for %q: %v", p, err)
+	}
 	bs, err := os.ReadFile(filepath.Join(pathHashDir, pathHashFile))
 	if err != nil {
 		return nil, nil, err
 	}
 	fileHashStr := string(bs)
-	if !strings.HasPrefix(fileHashStr, "sha256:") {
-		return nil, nil, fmt.Errorf("unsupported hash function for %q", fileHashStr)
-	}
-	h := &snapshot.Hash{
-		Function:    "sha256",
-		HexContents: strings.TrimPrefix(fileHashStr, "sha256:"),
+	h, err := snapshot.ParseHash(fileHashStr)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failure parsing the hash %q: %v", fileHashStr, err)
 	}
 	f, err := s.ReadSnapshot(ctx, h)
 	if err != nil {
@@ -187,7 +186,10 @@ func (s *Store) RemoveMappingForPath(ctx context.Context, p snapshot.Path) error
 		return nil
 	}
 
-	pathHashDir, pathHashFile := s.pathHashFile(p)
+	pathHashDir, pathHashFile, err := s.pathHashFile(p)
+	if err != nil {
+		return fmt.Errorf("failure calculating the path hash file location for %q: %v", p, err)
+	}
 	mappingPath := filepath.Join(pathHashDir, pathHashFile)
 	if err := os.Remove(mappingPath); err != nil {
 		return fmt.Errorf("failure removing the mapping from %q to %q: %v", p, h, err)
@@ -215,12 +217,13 @@ type cachedInfo struct {
 	Ino     uint64
 }
 
-func (s *Store) pathCacheFile(p snapshot.Path) (dir string, name string) {
-	pathHash := &snapshot.Hash{
-		Function:    "sha256",
-		HexContents: fmt.Sprintf("%x", sha256.Sum256([]byte(p))),
+func (s *Store) pathCacheFile(p snapshot.Path) (dir string, name string, err error) {
+	pathHash, err := snapshot.NewHash(strings.NewReader(string(p)))
+	if err != nil {
+		return "", "", fmt.Errorf("failure hashing the path name %q: %v", p, err)
 	}
-	return objectName(pathHash, filepath.Join(s.ArchiveDir, "cache"))
+	dir, name = objectName(pathHash, filepath.Join(s.ArchiveDir, "cache"))
+	return dir, name, nil
 }
 
 func (s *Store) CachePathInfo(ctx context.Context, p snapshot.Path, info os.FileInfo) error {
@@ -234,7 +237,10 @@ func (s *Store) CachePathInfo(ctx context.Context, p snapshot.Path, info os.File
 	}
 	ino := unix_info.Ino
 
-	cacheDir, cacheFile := s.pathCacheFile(p)
+	cacheDir, cacheFile, err := s.pathCacheFile(p)
+	if err != nil {
+		return fmt.Errorf("failure constructing the cache dir path for %q: %v", p, err)
+	}
 	cachePath := filepath.Join(cacheDir, cacheFile)
 	if err := os.MkdirAll(cacheDir, 0700); err != nil {
 		return fmt.Errorf("failure creating the cache dir for %q: %v", p, err)
@@ -262,7 +268,10 @@ func (s *Store) PathInfoMatchesCache(ctx context.Context, p snapshot.Path, info 
 		return false
 	}
 	ino := unix_info.Ino
-	cacheDir, cacheFile := s.pathCacheFile(p)
+	cacheDir, cacheFile, err := s.pathCacheFile(p)
+	if err != nil {
+		return false
+	}
 	bs, err := os.ReadFile(filepath.Join(cacheDir, cacheFile))
 	if err != nil {
 		return false

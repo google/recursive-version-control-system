@@ -18,8 +18,10 @@ package command
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 
 	"github.com/googlestaging/recursive-version-control-system/archive"
+	"github.com/googlestaging/recursive-version-control-system/snapshot"
 )
 
 type command func(context.Context, *archive.Store, string, []string) (int, error)
@@ -38,6 +40,22 @@ Where <SUBCOMMAND> is one of:
 	snapshot
 `
 )
+
+func resolveSnapshot(ctx context.Context, s *archive.Store, name string) (*snapshot.Hash, error) {
+	h, err := snapshot.ParseHash(name)
+	if err == nil {
+		return h, nil
+	}
+	abs, err := filepath.Abs(name)
+	if err != nil {
+		return nil, fmt.Errorf("failure resolving the absolute path of %q: %v", name, err)
+	}
+	h, _, err = s.FindSnapshot(ctx, snapshot.Path(abs))
+	if err == nil {
+		return h, nil
+	}
+	return nil, fmt.Errorf("unable to resolve the hash corresponding to %q", name)
+}
 
 // Run implements the subcommands of the `rvcs` CLI.
 //
