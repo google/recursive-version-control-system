@@ -24,7 +24,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/googlestaging/recursive-version-control-system/snapshot"
+	"github.com/google/recursive-version-control-system/snapshot"
 )
 
 func snapshotFileMetadata(ctx context.Context, s *Store, p snapshot.Path, info os.FileInfo, contentsHash *snapshot.Hash) (*snapshot.Hash, error) {

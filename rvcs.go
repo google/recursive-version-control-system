@@ -20,8 +20,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/googlestaging/recursive-version-control-system/archive"
-	"github.com/googlestaging/recursive-version-control-system/command"
+	"github.com/google/recursive-version-control-system/archive"
+	"github.com/google/recursive-version-control-system/command"
 )
 
 func main() {

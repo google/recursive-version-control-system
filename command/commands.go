@@ -20,8 +20,8 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/googlestaging/recursive-version-control-system/archive"
-	"github.com/googlestaging/recursive-version-control-system/snapshot"
+	"github.com/google/recursive-version-control-system/archive"
+	"github.com/google/recursive-version-control-system/snapshot"
 )
 
 type command func(context.Context, *archive.Store, string, []string) (int, error)
@@ -29,6 +29,7 @@ type command func(context.Context, *archive.Store, string, []string) (int, error
 var (
 	commandMap = map[string]command{
 		"log":      logCommand,
+		"merge":    mergeCommand,
 		"snapshot": snapshotCommand,
 	}
 
@@ -37,6 +38,7 @@ var (
 Where <SUBCOMMAND> is one of:
 
 	log
+	merge
 	snapshot
 `
 )

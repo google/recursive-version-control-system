@@ -21,7 +21,7 @@ import (
 	"sort"
 	"syscall"
 
-	"github.com/googlestaging/recursive-version-control-system/snapshot"
+	"github.com/google/recursive-version-control-system/snapshot"
 	"golang.org/x/term"
 )
 

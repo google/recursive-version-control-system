@@ -19,7 +19,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/googlestaging/recursive-version-control-system/archive"
+	"github.com/google/recursive-version-control-system/archive"
 )
 
 func logCommand(ctx context.Context, s *archive.Store, cmd string, args []string) (int, error) {

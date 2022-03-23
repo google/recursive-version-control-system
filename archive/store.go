@@ -25,7 +25,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/googlestaging/recursive-version-control-system/snapshot"
+	"github.com/google/recursive-version-control-system/snapshot"
 )
 
 // Store is used to write and read snapshots to persistent storage.

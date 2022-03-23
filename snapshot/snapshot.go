@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -272,4 +274,19 @@ func ParseFile(encoded string) (*File, error) {
 		Parents:  hashes[1:],
 	}
 	return f, nil
+}
+
+func (f *File) Permissions() os.FileMode {
+	if f == nil || len(f.Mode) < 9 {
+		// This is not a Posix-style mode line; default to 0700
+		return os.FileMode(0700)
+	}
+	permStr := f.Mode[len(f.Mode)-9:]
+	perm := fs.ModePerm
+	for i, c := range permStr {
+		if c == '-' {
+			perm ^= (1 << uint(8-i))
+		}
+	}
+	return perm
 }

@@ -18,38 +18,35 @@ package command
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"github.com/google/recursive-version-control-system/archive"
 	"github.com/google/recursive-version-control-system/snapshot"
 )
 
-func snapshotCommand(ctx context.Context, s *archive.Store, cmds string, args []string) (int, error) {
-	var path string
-	if len(args) > 0 {
-		path = args[0]
-	} else {
-		wd, err := os.Getwd()
-		if err != nil {
-			return 1, fmt.Errorf("failure determining the current working directory: %v\n", err)
-		}
-		path = wd
-	}
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return 1, fmt.Errorf("failure resolving the absolute path of %q: %v", path, err)
-	}
-	path = abs
+const mergeUsage = `Usage: %q merge <SOURCE> <DESTINATION>
 
-	h, err := archive.Snapshot(ctx, s, snapshot.Path(path))
-	if err != nil {
-		return 1, fmt.Errorf("failure snapshotting the directory %q: %v\n", path, err)
-	} else if h == nil {
-		fmt.Printf("Did not generate a snapshot as %q does not exist\n", path)
+Where <DESTINATION> is a local file path, and <SOURCE> is one of:
+
+	The hash of a known snapshot.
+	A local file path which has previously been snapshotted.
+`
+
+func mergeCommand(ctx context.Context, s *archive.Store, cmd string, args []string) (int, error) {
+	if len(args) != 2 {
+		fmt.Printf(mergeUsage, cmd)
 		return 1, nil
 	}
-
-	fmt.Printf("Snapshotted %q to %q\n", path, h)
+	h, err := resolveSnapshot(ctx, s, args[0])
+	if err != nil {
+		return 1, fmt.Errorf("failure resolving the snapshot hash for %q: %v", args[0], err)
+	}
+	abs, err := filepath.Abs(args[1])
+	if err != nil {
+		return 1, fmt.Errorf("failure determining the absolute path of %q: %v", args[1], err)
+	}
+	if err := archive.Merge(ctx, s, h, snapshot.Path(abs)); err != nil {
+		return 1, fmt.Errorf("failure merging %q into %q: %v", h, abs, err)
+	}
 	return 0, nil
 }
