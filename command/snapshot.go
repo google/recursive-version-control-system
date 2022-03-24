@@ -17,15 +17,51 @@ package command
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/google/recursive-version-control-system/archive"
 	"github.com/google/recursive-version-control-system/snapshot"
 )
 
-func snapshotCommand(ctx context.Context, s *archive.Store, cmds string, args []string) (int, error) {
+const snapshotUsage = `Usage: %s snapshot [<FLAGS>]* <PATH>
+
+Where <PATH> is a local filesystem path, and <FLAGS> are one of:
+
+`
+
+var (
+	snapshotFlags = flag.NewFlagSet("snapshot", flag.ContinueOnError)
+
+	snapshotAdditionalParentsFlag = snapshotFlags.String(
+		"additional-parents", "",
+		"comma separated list of additional parents for the generated snapshot")
+)
+
+func snapshotCommand(ctx context.Context, s *archive.Store, cmd string, args []string) (int, error) {
+	snapshotFlags.Usage = func() {
+		fmt.Fprintf(flag.CommandLine.Output(), snapshotUsage, cmd)
+		snapshotFlags.PrintDefaults()
+	}
+	if err := snapshotFlags.Parse(args); err != nil {
+		return 1, nil
+	}
+	args = snapshotFlags.Args()
+
+	var additionalParents []*snapshot.Hash
+	for _, parent := range strings.Split(*snapshotAdditionalParentsFlag, ",") {
+		parentHash, err := resolveSnapshot(ctx, s, parent)
+		if err != nil {
+			return 1, fmt.Errorf("failure resolving the additional parent %q: %v", parent, err)
+		}
+		if parentHash != nil {
+			additionalParents = append(additionalParents, parentHash)
+		}
+	}
+
 	var path string
 	if len(args) > 0 {
 		path = args[0]
@@ -42,7 +78,7 @@ func snapshotCommand(ctx context.Context, s *archive.Store, cmds string, args []
 	}
 	path = abs
 
-	h, err := archive.Snapshot(ctx, s, snapshot.Path(path))
+	h, err := archive.Snapshot(ctx, s, snapshot.Path(path), additionalParents...)
 	if err != nil {
 		return 1, fmt.Errorf("failure snapshotting the directory %q: %v\n", path, err)
 	} else if h == nil {

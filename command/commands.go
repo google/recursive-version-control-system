@@ -17,6 +17,7 @@ package command
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"path/filepath"
 
@@ -67,18 +68,18 @@ func resolveSnapshot(ctx context.Context, s *archive.Store, name string) (*snaps
 // and non-zero for any form of failure.
 func Run(ctx context.Context, s *archive.Store, args []string) (exitCode int) {
 	if len(args) < 2 {
-		fmt.Printf(usage, args[0])
+		fmt.Fprintf(flag.CommandLine.Output(), usage, args[0])
 		return 1
 	}
 	subcommand, ok := commandMap[args[1]]
 	if !ok {
-		fmt.Printf("Unknown subcommand %q\n", args[1])
-		fmt.Printf(usage, args[0])
+		fmt.Fprintf(flag.CommandLine.Output(), "Unknown subcommand %q\n", args[1])
+		fmt.Fprintf(flag.CommandLine.Output(), usage, args[0])
 		return 1
 	}
 	retcode, err := subcommand(ctx, s, args[0], args[2:])
 	if err != nil {
-		fmt.Printf("Failure running the %q subcommand: %v\n", args[1], err)
+		fmt.Fprintf(flag.CommandLine.Output(), "Failure running the %q subcommand: %v\n", args[1], err)
 	}
 	return retcode
 }

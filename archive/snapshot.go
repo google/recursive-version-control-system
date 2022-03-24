@@ -27,13 +27,13 @@ import (
 	"github.com/google/recursive-version-control-system/snapshot"
 )
 
-func snapshotFileMetadata(ctx context.Context, s *Store, p snapshot.Path, info os.FileInfo, contentsHash *snapshot.Hash) (*snapshot.Hash, error) {
+func snapshotFileMetadata(ctx context.Context, s *Store, p snapshot.Path, info os.FileInfo, contentsHash *snapshot.Hash, additionalParents []*snapshot.Hash) (*snapshot.Hash, error) {
 	modeLine := info.Mode().String()
 	prevFileHash, prev, err := s.FindSnapshot(ctx, p)
 	if err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("failure looking up the previous file snapshot: %v", err)
 	}
-	if prev != nil && prev.Mode == modeLine && prev.Contents.Equal(contentsHash) {
+	if len(additionalParents) == 0 && prev != nil && prev.Mode == modeLine && prev.Contents.Equal(contentsHash) {
 		// The file is unchanged from the last snapshot...
 		return prevFileHash, nil
 	}
@@ -43,6 +43,9 @@ func snapshotFileMetadata(ctx context.Context, s *Store, p snapshot.Path, info o
 	}
 	if prev != nil {
 		f.Parents = []*snapshot.Hash{prevFileHash}
+	}
+	if len(additionalParents) > 0 {
+		f.Parents = append(f.Parents, additionalParents...)
 	}
 	h, err := s.StoreSnapshot(ctx, p, f)
 	if err != nil {
@@ -83,7 +86,7 @@ func readCached(ctx context.Context, s *Store, p snapshot.Path, info os.FileInfo
 	return cachedHash, true
 }
 
-func snapshotRegularFile(ctx context.Context, s *Store, p snapshot.Path, info os.FileInfo, contents io.Reader) (h *snapshot.Hash, err error) {
+func snapshotRegularFile(ctx context.Context, s *Store, p snapshot.Path, info os.FileInfo, contents io.Reader, additionalParents []*snapshot.Hash) (h *snapshot.Hash, err error) {
 	if cached, ok := readCached(ctx, s, p, info); ok {
 		return cached, nil
 	}
@@ -96,10 +99,10 @@ func snapshotRegularFile(ctx context.Context, s *Store, p snapshot.Path, info os
 	if err != nil {
 		return nil, fmt.Errorf("failure storing an object: %v", err)
 	}
-	return snapshotFileMetadata(ctx, s, p, info, h)
+	return snapshotFileMetadata(ctx, s, p, info, h, additionalParents)
 }
 
-func snapshotDirectory(ctx context.Context, s *Store, p snapshot.Path, info os.FileInfo, contents *os.File) (*snapshot.Hash, error) {
+func snapshotDirectory(ctx context.Context, s *Store, p snapshot.Path, info os.FileInfo, contents *os.File, additionalParents []*snapshot.Hash) (*snapshot.Hash, error) {
 	entries, err := contents.ReadDir(0)
 	if err != nil {
 		return nil, fmt.Errorf("failure reading the filesystem contents of the directory %q: %v", p, err)
@@ -118,10 +121,10 @@ func snapshotDirectory(ctx context.Context, s *Store, p snapshot.Path, info os.F
 	}
 	contentsJson := []byte(childHashes.String())
 	contentsHash, err := s.StoreObject(ctx, bytes.NewReader(contentsJson))
-	return snapshotFileMetadata(ctx, s, p, info, contentsHash)
+	return snapshotFileMetadata(ctx, s, p, info, contentsHash, additionalParents)
 }
 
-func snapshotLink(ctx context.Context, s *Store, p snapshot.Path, info os.FileInfo) (*snapshot.Hash, error) {
+func snapshotLink(ctx context.Context, s *Store, p snapshot.Path, info os.FileInfo, additionalParents []*snapshot.Hash) (*snapshot.Hash, error) {
 	target, err := os.Readlink(string(p))
 	if err != nil {
 		return nil, fmt.Errorf("failure reading the link target for %q: %v", p, err)
@@ -131,7 +134,7 @@ func snapshotLink(ctx context.Context, s *Store, p snapshot.Path, info os.FileIn
 	if err != nil {
 		return nil, fmt.Errorf("failure storing an object: %v", err)
 	}
-	return snapshotFileMetadata(ctx, s, p, info, h)
+	return snapshotFileMetadata(ctx, s, p, info, h, additionalParents)
 }
 
 // Snapshot generates a snapshot for the given path, stored in the given store.
@@ -139,7 +142,7 @@ func snapshotLink(ctx context.Context, s *Store, p snapshot.Path, info os.FileIn
 // The passed in path must be an absolute path.
 //
 // The returned value is the hash of the generated `snapshot.File` object.
-func Snapshot(ctx context.Context, s *Store, p snapshot.Path) (*snapshot.Hash, error) {
+func Snapshot(ctx context.Context, s *Store, p snapshot.Path, additionalParents ...*snapshot.Hash) (*snapshot.Hash, error) {
 	stat, err := os.Lstat(string(p))
 	if os.IsNotExist(err) {
 		// The referenced file does not exist, so the corresponding
@@ -150,7 +153,7 @@ func Snapshot(ctx context.Context, s *Store, p snapshot.Path) (*snapshot.Hash, e
 		return nil, fmt.Errorf("failure reading the file stat for %q: %v", p, err)
 	}
 	if stat.Mode()&fs.ModeSymlink != 0 {
-		return snapshotLink(ctx, s, p, stat)
+		return snapshotLink(ctx, s, p, stat, additionalParents)
 	}
 	contents, err := os.Open(string(p))
 	if os.IsNotExist(err) {
@@ -171,8 +174,8 @@ func Snapshot(ctx context.Context, s *Store, p snapshot.Path) (*snapshot.Hash, e
 		return nil, fmt.Errorf("failure reading the filesystem metadata for %q: %v", p, err)
 	}
 	if info.IsDir() {
-		return snapshotDirectory(ctx, s, p, info, contents)
+		return snapshotDirectory(ctx, s, p, info, contents, additionalParents)
 	} else {
-		return snapshotRegularFile(ctx, s, p, info, contents)
+		return snapshotRegularFile(ctx, s, p, info, contents, additionalParents)
 	}
 }

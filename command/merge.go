@@ -17,6 +17,7 @@ package command
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"path/filepath"
 
@@ -24,7 +25,7 @@ import (
 	"github.com/google/recursive-version-control-system/snapshot"
 )
 
-const mergeUsage = `Usage: %q merge <SOURCE> <DESTINATION>
+const mergeUsage = `Usage: %s merge <SOURCE> <DESTINATION>
 
 Where <DESTINATION> is a local file path, and <SOURCE> is one of:
 
@@ -34,7 +35,7 @@ Where <DESTINATION> is a local file path, and <SOURCE> is one of:
 
 func mergeCommand(ctx context.Context, s *archive.Store, cmd string, args []string) (int, error) {
 	if len(args) != 2 {
-		fmt.Printf(mergeUsage, cmd)
+		fmt.Fprintf(flag.CommandLine.Output(), mergeUsage, cmd)
 		return 1, nil
 	}
 	h, err := resolveSnapshot(ctx, s, args[0])

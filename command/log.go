@@ -17,6 +17,7 @@ package command
 
 import (
 	"context"
+	"flag"
 	"fmt"
 
 	"github.com/google/recursive-version-control-system/archive"
@@ -24,7 +25,7 @@ import (
 
 func logCommand(ctx context.Context, s *archive.Store, cmd string, args []string) (int, error) {
 	if len(args) != 1 {
-		fmt.Printf("Usage: %q log <HASH>\n", cmd)
+		fmt.Fprintf(flag.CommandLine.Output(), "Usage: %s log <HASH>\n", cmd)
 		return 1, nil
 	}
 	h, err := resolveSnapshot(ctx, s, args[0])
