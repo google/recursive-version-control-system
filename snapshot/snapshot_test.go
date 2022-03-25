@@ -12,10 +12,54 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package snapshot implements the history model for rvcs.
 package snapshot
 
 import "testing"
+
+func TestParseFileRoundTrip(t *testing.T) {
+	testCases := []struct {
+		Description string
+		Serialized  string
+		Want        string
+		WantError   bool
+	}{
+		{
+			Description: "empty file string",
+		},
+		{
+			Description: "missing contents",
+			Serialized:  "drwxr-x---",
+			WantError:   true,
+		},
+		{
+			Description: "empty contents",
+			Serialized:  "drwxr-x---\n",
+			WantError:   true,
+		},
+		{
+			Description: "empty directory",
+			Serialized:  "drwxr-x---\nsha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+			Want:        "drwxr-x---\nsha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+		},
+		{
+			Description: "empty lines in parents",
+			Serialized:  "drwxr-x---\nsha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n\n",
+			Want:        "drwxr-x---\nsha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+		},
+	}
+	for _, testCase := range testCases {
+		parsed, err := ParseFile(testCase.Serialized)
+		if testCase.WantError {
+			if err == nil {
+				t.Errorf("unexpected response for test case %q: %+v", testCase.Description, parsed)
+			}
+		} else if err != nil {
+			t.Errorf("unexpected failure parsing the serialized file %q for the test case %q: %v", testCase.Serialized, testCase.Description, err)
+		} else if got, want := parsed.String(), testCase.Want; got != want {
+			t.Errorf("unexpected result for file parsing roundtrip of %q; got %q, want %q", testCase.Description, got, want)
+		}
+	}
+}
 
 func TestFilePermissions(t *testing.T) {
 	testCases := []struct {
