@@ -23,9 +23,10 @@ import (
 	"path/filepath"
 
 	"github.com/google/recursive-version-control-system/snapshot"
+	"github.com/google/recursive-version-control-system/storage"
 )
 
-func recreateLink(ctx context.Context, s *Store, h *snapshot.Hash, f *snapshot.File, p snapshot.Path) error {
+func recreateLink(ctx context.Context, s *storage.LocalFiles, h *snapshot.Hash, f *snapshot.File, p snapshot.Path) error {
 	contentsReader, err := s.ReadObject(ctx, f.Contents)
 	if err != nil {
 		return fmt.Errorf("failure opening the contents of the link snapshot %q: %v", h, err)
@@ -40,7 +41,7 @@ func recreateLink(ctx context.Context, s *Store, h *snapshot.Hash, f *snapshot.F
 	return nil
 }
 
-func recreateDir(ctx context.Context, s *Store, h *snapshot.Hash, f *snapshot.File, p snapshot.Path) error {
+func recreateDir(ctx context.Context, s *storage.LocalFiles, h *snapshot.Hash, f *snapshot.File, p snapshot.Path) error {
 	perm := f.Permissions()
 	if err := os.Mkdir(string(p), perm); err != nil {
 		return fmt.Errorf("failure creating the directory %q: %v", p, err)
@@ -58,7 +59,7 @@ func recreateDir(ctx context.Context, s *Store, h *snapshot.Hash, f *snapshot.Fi
 	return nil
 }
 
-func recreateFile(ctx context.Context, s *Store, h *snapshot.Hash, f *snapshot.File, p snapshot.Path) error {
+func recreateFile(ctx context.Context, s *storage.LocalFiles, h *snapshot.Hash, f *snapshot.File, p snapshot.Path) error {
 	if f.IsLink() {
 		return recreateLink(ctx, s, h, f, p)
 	}
@@ -83,7 +84,7 @@ func recreateFile(ctx context.Context, s *Store, h *snapshot.Hash, f *snapshot.F
 	return nil
 }
 
-func Checkout(ctx context.Context, s *Store, h *snapshot.Hash, p snapshot.Path) error {
+func Checkout(ctx context.Context, s *storage.LocalFiles, h *snapshot.Hash, p snapshot.Path) error {
 	f, err := s.ReadSnapshot(ctx, h)
 	if err != nil {
 		return fmt.Errorf("failure reading the file snapshot for %q: %v", h, err)
@@ -101,7 +102,7 @@ func Checkout(ctx context.Context, s *Store, h *snapshot.Hash, p snapshot.Path) 
 	return nil
 }
 
-func MergeBase(ctx context.Context, s *Store, lhs, rhs *snapshot.Hash) (*snapshot.Hash, error) {
+func MergeBase(ctx context.Context, s *storage.LocalFiles, lhs, rhs *snapshot.Hash) (*snapshot.Hash, error) {
 	if lhs.Equal(rhs) {
 		return lhs, nil
 	}
@@ -138,7 +139,7 @@ func MergeBase(ctx context.Context, s *Store, lhs, rhs *snapshot.Hash) (*snapsho
 	return nil, nil
 }
 
-func Merge(ctx context.Context, s *Store, src *snapshot.Hash, dest snapshot.Path) error {
+func Merge(ctx context.Context, s *storage.LocalFiles, src *snapshot.Hash, dest snapshot.Path) error {
 	destParent := filepath.Dir(string(dest))
 	if err := os.MkdirAll(destParent, os.FileMode(0700)); err != nil {
 		return fmt.Errorf("failure ensuring the parent directory of %q exists: %v", dest, err)

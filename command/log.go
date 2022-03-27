@@ -21,9 +21,10 @@ import (
 	"fmt"
 
 	"github.com/google/recursive-version-control-system/archive"
+	"github.com/google/recursive-version-control-system/storage"
 )
 
-func logCommand(ctx context.Context, s *archive.Store, cmd string, args []string) (int, error) {
+func logCommand(ctx context.Context, s *storage.LocalFiles, cmd string, args []string) (int, error) {
 	if len(args) != 1 {
 		fmt.Fprintf(flag.CommandLine.Output(), "Usage: %s log <HASH>\n", cmd)
 		return 1, nil

@@ -21,11 +21,11 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/google/recursive-version-control-system/archive"
 	"github.com/google/recursive-version-control-system/snapshot"
+	"github.com/google/recursive-version-control-system/storage"
 )
 
-type command func(context.Context, *archive.Store, string, []string) (int, error)
+type command func(context.Context, *storage.LocalFiles, string, []string) (int, error)
 
 var (
 	commandMap = map[string]command{
@@ -44,7 +44,7 @@ Where <SUBCOMMAND> is one of:
 `
 )
 
-func resolveSnapshot(ctx context.Context, s *archive.Store, name string) (*snapshot.Hash, error) {
+func resolveSnapshot(ctx context.Context, s *storage.LocalFiles, name string) (*snapshot.Hash, error) {
 	h, err := snapshot.ParseHash(name)
 	if err == nil {
 		return h, nil
@@ -66,7 +66,7 @@ func resolveSnapshot(ctx context.Context, s *archive.Store, name string) (*snaps
 //
 // The returned value is the exit code of the command; 0 for success
 // and non-zero for any form of failure.
-func Run(ctx context.Context, s *archive.Store, args []string) (exitCode int) {
+func Run(ctx context.Context, s *storage.LocalFiles, args []string) (exitCode int) {
 	if len(args) < 2 {
 		fmt.Fprintf(flag.CommandLine.Output(), usage, args[0])
 		return 1

@@ -20,8 +20,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/google/recursive-version-control-system/archive"
 	"github.com/google/recursive-version-control-system/command"
+	"github.com/google/recursive-version-control-system/storage"
 )
 
 func main() {
@@ -29,7 +29,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("failure resolving the user's home dir: %v\n", err)
 	}
-	s := &archive.Store{filepath.Join(home, ".rvcs/archive")}
+	s := &storage.LocalFiles{filepath.Join(home, ".rvcs/archive")}
 	ctx := context.Background()
 
 	ret := command.Run(ctx, s, os.Args)

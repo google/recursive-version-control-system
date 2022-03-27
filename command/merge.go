@@ -23,6 +23,7 @@ import (
 
 	"github.com/google/recursive-version-control-system/archive"
 	"github.com/google/recursive-version-control-system/snapshot"
+	"github.com/google/recursive-version-control-system/storage"
 )
 
 const mergeUsage = `Usage: %s merge <SOURCE> <DESTINATION>
@@ -33,7 +34,7 @@ Where <DESTINATION> is a local file path, and <SOURCE> is one of:
 	A local file path which has previously been snapshotted.
 `
 
-func mergeCommand(ctx context.Context, s *archive.Store, cmd string, args []string) (int, error) {
+func mergeCommand(ctx context.Context, s *storage.LocalFiles, cmd string, args []string) (int, error) {
 	if len(args) != 2 {
 		fmt.Fprintf(flag.CommandLine.Output(), mergeUsage, cmd)
 		return 1, nil

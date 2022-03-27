@@ -22,6 +22,7 @@ import (
 	"syscall"
 
 	"github.com/google/recursive-version-control-system/snapshot"
+	"github.com/google/recursive-version-control-system/storage"
 	"golang.org/x/term"
 )
 
@@ -53,7 +54,7 @@ type LogEntry struct {
 	nestedContents map[string]*snapshot.Hash
 }
 
-func dirContents(ctx context.Context, s *Store, h *snapshot.Hash, f *snapshot.File, subpath string, includeDirectories bool, contentsMap map[string]*snapshot.Hash) error {
+func dirContents(ctx context.Context, s *storage.LocalFiles, h *snapshot.Hash, f *snapshot.File, subpath string, includeDirectories bool, contentsMap map[string]*snapshot.Hash) error {
 	tree, err := s.ListDirectorySnapshotContents(ctx, h, f)
 	if err != nil {
 		return fmt.Errorf("failure listing the directory contents of the snapshot %q: %v", h, err)
@@ -83,7 +84,7 @@ func dirContents(ctx context.Context, s *Store, h *snapshot.Hash, f *snapshot.Fi
 //
 // This is only defined for snapshots of directories, and for all other
 // cases the return value will be nil.
-func (e *LogEntry) NestedContents(ctx context.Context, s *Store, includeDirectories bool) ([]string, map[string]*snapshot.Hash, error) {
+func (e *LogEntry) NestedContents(ctx context.Context, s *storage.LocalFiles, includeDirectories bool) ([]string, map[string]*snapshot.Hash, error) {
 	if e.nestedPaths != nil && e.nestedContents != nil {
 		return e.nestedPaths, e.nestedContents, nil
 	}
@@ -151,7 +152,7 @@ func describeChanged(paths, previousPaths []string, contents, previousContents m
 	return changes
 }
 
-func SummarizeLog(ctx context.Context, s *Store, entries []*LogEntry) (map[snapshot.Hash][]string, error) {
+func SummarizeLog(ctx context.Context, s *storage.LocalFiles, entries []*LogEntry) (map[snapshot.Hash][]string, error) {
 	pathsMap := make(map[snapshot.Hash][]string)
 	contentsMap := make(map[snapshot.Hash]map[string]*snapshot.Hash)
 	for _, e := range entries {
@@ -184,7 +185,7 @@ func SummarizeLog(ctx context.Context, s *Store, entries []*LogEntry) (map[snaps
 	return result, nil
 }
 
-func ReadLog(ctx context.Context, s *Store, h *snapshot.Hash) ([]*LogEntry, error) {
+func ReadLog(ctx context.Context, s *storage.LocalFiles, h *snapshot.Hash) ([]*LogEntry, error) {
 	visited := make(map[snapshot.Hash]*snapshot.File)
 	queue := []*snapshot.Hash{h}
 	result := []*LogEntry{}

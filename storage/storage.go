@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package archive
+// Package storage defines the persistent storage of snapshots.
+package storage
 
 import (
 	"bytes"
@@ -28,19 +29,21 @@ import (
 	"github.com/google/recursive-version-control-system/snapshot"
 )
 
-// Store is used to write and read snapshots to persistent storage.
-type Store struct {
+// LocalFiles implementes the `snapshot.Storage` interface using the local file system.
+//
+// It is used to write and read snapshots to persistent storage.
+type LocalFiles struct {
 	ArchiveDir string
 }
 
 // Exclude reports whether or not the given path should be excluded from snapshotting.
 //
 // This should return true for any paths that are part of the underlying persistent storage.
-func (s *Store) Exclude(p snapshot.Path) bool {
+func (s *LocalFiles) Exclude(p snapshot.Path) bool {
 	return p == snapshot.Path(s.ArchiveDir)
 }
 
-func (s *Store) tmpFile(ctx context.Context) (*os.File, error) {
+func (s *LocalFiles) tmpFile(ctx context.Context) (*os.File, error) {
 	tmpDir := filepath.Join(s.ArchiveDir, "tmp")
 	if err := os.MkdirAll(tmpDir, os.FileMode(0700)); err != nil {
 		return nil, fmt.Errorf("failure creating the tmp dir: %v", err)
@@ -48,7 +51,7 @@ func (s *Store) tmpFile(ctx context.Context) (*os.File, error) {
 	return os.CreateTemp(tmpDir, "archiver")
 }
 
-func (s *Store) StoreObject(ctx context.Context, reader io.Reader) (h *snapshot.Hash, err error) {
+func (s *LocalFiles) StoreObject(ctx context.Context, reader io.Reader) (h *snapshot.Hash, err error) {
 	var tmp *os.File
 	tmp, err = s.tmpFile(ctx)
 	if err != nil {
@@ -85,16 +88,16 @@ func objectName(h *snapshot.Hash, parentDir string) (dir string, name string) {
 	return functionDir, h.HexContents()
 }
 
-func (s *Store) ReadObject(ctx context.Context, h *snapshot.Hash) (io.ReadCloser, error) {
+func (s *LocalFiles) ReadObject(ctx context.Context, h *snapshot.Hash) (io.ReadCloser, error) {
 	objPath, objName := objectName(h, filepath.Join(s.ArchiveDir, "objects"))
 	return os.Open(filepath.Join(objPath, objName))
 }
 
-func (s *Store) mappedPathsDir(p snapshot.Path) string {
+func (s *LocalFiles) mappedPathsDir(p snapshot.Path) string {
 	return filepath.Join(s.ArchiveDir, "mappedPaths", string(p))
 }
 
-func (s *Store) pathHashFile(p snapshot.Path) (dir string, name string, err error) {
+func (s *LocalFiles) pathHashFile(p snapshot.Path) (dir string, name string, err error) {
 	pathHash, err := snapshot.NewHash(strings.NewReader(string(p)))
 	if err != nil {
 		return "", "", fmt.Errorf("failure hashing the path name %q: %v", p, err)
@@ -103,7 +106,7 @@ func (s *Store) pathHashFile(p snapshot.Path) (dir string, name string, err erro
 	return dir, name, nil
 }
 
-func (s *Store) StoreSnapshot(ctx context.Context, p snapshot.Path, f *snapshot.File) (*snapshot.Hash, error) {
+func (s *LocalFiles) StoreSnapshot(ctx context.Context, p snapshot.Path, f *snapshot.File) (*snapshot.Hash, error) {
 	if err := os.MkdirAll(s.mappedPathsDir(p), 0700); err != nil {
 		return nil, fmt.Errorf("failure creating the mapped paths dir entry for %q: %v", p, err)
 	}
@@ -148,7 +151,7 @@ func (s *Store) StoreSnapshot(ctx context.Context, p snapshot.Path, f *snapshot.
 	return h, nil
 }
 
-func (s *Store) ReadSnapshot(ctx context.Context, h *snapshot.Hash) (*snapshot.File, error) {
+func (s *LocalFiles) ReadSnapshot(ctx context.Context, h *snapshot.Hash) (*snapshot.File, error) {
 	reader, err := s.ReadObject(ctx, h)
 	if err != nil {
 		return nil, fmt.Errorf("failure looking up the file snapshot for %q: %v", h, err)
@@ -165,7 +168,7 @@ func (s *Store) ReadSnapshot(ctx context.Context, h *snapshot.Hash) (*snapshot.F
 	return f, nil
 }
 
-func (s *Store) FindSnapshot(ctx context.Context, p snapshot.Path) (*snapshot.Hash, *snapshot.File, error) {
+func (s *LocalFiles) FindSnapshot(ctx context.Context, p snapshot.Path) (*snapshot.Hash, *snapshot.File, error) {
 	pathHashDir, pathHashFile, err := s.pathHashFile(p)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failure calculating the path hash file location for %q: %v", p, err)
@@ -189,7 +192,7 @@ func (s *Store) FindSnapshot(ctx context.Context, p snapshot.Path) (*snapshot.Ha
 // ListDirectorySnapshotContents returns the parsed `*snapshot.Tree` object listing the contents of `f`.
 //
 // The supplied `*snapshot.File` object must correspond to a directory.
-func (s *Store) ListDirectorySnapshotContents(ctx context.Context, h *snapshot.Hash, f *snapshot.File) (snapshot.Tree, error) {
+func (s *LocalFiles) ListDirectorySnapshotContents(ctx context.Context, h *snapshot.Hash, f *snapshot.File) (snapshot.Tree, error) {
 	if !f.IsDir() {
 		return nil, fmt.Errorf("%q is not the snapshot of a directory", h)
 	}
@@ -208,7 +211,7 @@ func (s *Store) ListDirectorySnapshotContents(ctx context.Context, h *snapshot.H
 	return tree, nil
 }
 
-func (s *Store) RemoveMappingForPath(ctx context.Context, p snapshot.Path) error {
+func (s *LocalFiles) RemoveMappingForPath(ctx context.Context, p snapshot.Path) error {
 	if err := os.RemoveAll(s.mappedPathsDir(p)); err != nil {
 		return fmt.Errorf("failure removing the mapped paths entry for %q: %v", p, err)
 	}
@@ -249,7 +252,7 @@ type cachedInfo struct {
 	Ino     uint64
 }
 
-func (s *Store) pathCacheFile(p snapshot.Path) (dir string, name string, err error) {
+func (s *LocalFiles) pathCacheFile(p snapshot.Path) (dir string, name string, err error) {
 	pathHash, err := snapshot.NewHash(strings.NewReader(string(p)))
 	if err != nil {
 		return "", "", fmt.Errorf("failure hashing the path name %q: %v", p, err)
@@ -258,7 +261,7 @@ func (s *Store) pathCacheFile(p snapshot.Path) (dir string, name string, err err
 	return dir, name, nil
 }
 
-func (s *Store) CachePathInfo(ctx context.Context, p snapshot.Path, info os.FileInfo) error {
+func (s *LocalFiles) CachePathInfo(ctx context.Context, p snapshot.Path, info os.FileInfo) error {
 	sysInfo := info.Sys()
 	if sysInfo == nil {
 		return nil
@@ -290,7 +293,7 @@ func (s *Store) CachePathInfo(ctx context.Context, p snapshot.Path, info os.File
 	return os.WriteFile(cachePath, []byte(newInfo), 0700)
 }
 
-func (s *Store) PathInfoMatchesCache(ctx context.Context, p snapshot.Path, info os.FileInfo) bool {
+func (s *LocalFiles) PathInfoMatchesCache(ctx context.Context, p snapshot.Path, info os.FileInfo) bool {
 	sysInfo := info.Sys()
 	if sysInfo == nil {
 		return false

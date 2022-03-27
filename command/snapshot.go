@@ -23,8 +23,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/google/recursive-version-control-system/archive"
 	"github.com/google/recursive-version-control-system/snapshot"
+	"github.com/google/recursive-version-control-system/storage"
 )
 
 const snapshotUsage = `Usage: %s snapshot [<FLAGS>]* <PATH>
@@ -41,7 +41,7 @@ var (
 		"comma separated list of additional parents for the generated snapshot")
 )
 
-func snapshotCommand(ctx context.Context, s *archive.Store, cmd string, args []string) (int, error) {
+func snapshotCommand(ctx context.Context, s *storage.LocalFiles, cmd string, args []string) (int, error) {
 	snapshotFlags.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(), snapshotUsage, cmd)
 		snapshotFlags.PrintDefaults()
