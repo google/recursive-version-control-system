@@ -26,14 +26,31 @@ import (
 	"strings"
 )
 
+// Storage defines persistent storage of snapshots.
 type Storage interface {
+	// StoreObject persists the contents of the given reader, returning the resulting hash of those contents.
+	//
+	// This is used for persistently storing the contents of individual files.
 	StoreObject(context.Context, io.Reader) (*Hash, error)
 
+	// Exclude reports whether or not the given path should be excluded from storage.
 	Exclude(Path) bool
+
+	// FindSnapshot reads the latest snapshot (if any) for the given path.
 	FindSnapshot(context.Context, Path) (*Hash, *File, error)
+
+	// StoreSnapshot stores a mapping from the given path to the given snapshot.
 	StoreSnapshot(context.Context, Path, *File) (*Hash, error)
 
+	// CachePathInfo caches the file information for the given path.
+	//
+	// This is used to avoid rehashing the contents of files that have
+	// not changed since the last time they were snapshotted.
 	CachePathInfo(context.Context, Path, os.FileInfo) error
+
+	// PathInfoMatchesCache reports whether or not the given file
+	// information matches the file information that was previously cached
+	// for the given path.
 	PathInfoMatchesCache(context.Context, Path, os.FileInfo) bool
 }
 
