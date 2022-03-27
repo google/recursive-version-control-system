@@ -78,12 +78,19 @@ func snapshotCommand(ctx context.Context, s *archive.Store, cmd string, args []s
 	}
 	path = abs
 
-	h, err := archive.Snapshot(ctx, s, snapshot.Path(path), additionalParents...)
+	h, f, err := snapshot.Current(ctx, s, snapshot.Path(path))
 	if err != nil {
 		return 1, fmt.Errorf("failure snapshotting the directory %q: %v\n", path, err)
-	} else if h == nil {
+	} else if h == nil || f == nil {
 		fmt.Printf("Did not generate a snapshot as %q does not exist\n", path)
 		return 1, nil
+	}
+	if len(additionalParents) > 0 {
+		f.Parents = append(f.Parents, additionalParents...)
+		h, err = s.StoreSnapshot(ctx, snapshot.Path(path), f)
+		if err != nil {
+			return 1, fmt.Errorf("failure updating the snapshot of %q to include the additional parents %v: %v", path, additionalParents, err)
+		}
 	}
 
 	fmt.Printf("Snapshotted %q to %q\n", path, h)

@@ -12,133 +12,159 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package snapshot implements the history model for rvcs.
+// Package snapshot defines the model for snapshots of a file's history.
 package snapshot
 
 import (
+	"bytes"
+	"context"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
-// File is the top-level object in a snapshot.
-//
-// File encodes the entire, transitive history of a file. If the file is
-// a directory, then this history also includes the histories for all
-// of the children of that directory.
-type File struct {
-	// Mode is the string representation of a Posix-style file mode.
-	//
-	// It should be of the form [<FILE_TYPE>]+<FILE_PERMISSIONS>.
-	//
-	// <FILE_TYPE> is a single character indicating the type of the
-	// file, such as `d` for a directory or `L` for a symbolic link, etc.
-	//
-	// <FILE_PERMISSIONS> is a sequence of 9 characters representing the
-	// Unix permission bits.
-	Mode string
+type Storage interface {
+	StoreObject(context.Context, io.Reader) (*Hash, error)
 
-	// Contents is the hash of the contents for the snapshotted file.
-	//
-	// If the file is a directory (the mode line starts with `d`), then
-	// this will be the hash of a `Tree` object.
-	//
-	// If the file is a symbolic link (the mode line starts with a `L`),
-	// then this will be the hash of another `File` object, unless the
-	// link is broken in which case the contents will be nil.
-	//
-	// In all other cases, the contents is a hash of the sequence of
-	// bytes read from the file.
-	Contents *Hash
+	Exclude(Path) bool
+	FindSnapshot(context.Context, Path) (*Hash, *File, error)
+	StoreSnapshot(context.Context, Path, *File) (*Hash, error)
 
-	// Parents stores the hashes for the previous snapshots that
-	// immediately preceeded this one.
-	Parents []*Hash
+	CachePathInfo(context.Context, Path, os.FileInfo) error
+	PathInfoMatchesCache(context.Context, Path, os.FileInfo) bool
 }
 
-// IsDir reports whether or not the file is the snapshot of a directory.
-func (f *File) IsDir() bool {
-	if f == nil {
-		return false
+func snapshotFileMetadata(ctx context.Context, s Storage, p Path, info os.FileInfo, contentsHash *Hash) (*Hash, *File, error) {
+	modeLine := info.Mode().String()
+	prevFileHash, prev, err := s.FindSnapshot(ctx, p)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, nil, fmt.Errorf("failure looking up the previous file snapshot: %v", err)
 	}
-	return strings.HasPrefix(f.Mode, "d")
-}
-
-// IsLink reports whether or not the file is the snapshot of a symbolic link.
-func (f *File) IsLink() bool {
-	if f == nil {
-		return false
-	}
-	return strings.HasPrefix(f.Mode, "L")
-}
-
-// String implements the `fmt.Stringer` interface.
-//
-// The resulting value is suitable for serialization.
-func (f *File) String() string {
-	if f == nil {
-		return ""
-	}
-	var contentsStr string
-	if f.Contents != nil {
-		contentsStr = f.Contents.String()
-	}
-	lines := []string{f.Mode, contentsStr}
-	for _, parent := range f.Parents {
-		if parent != nil {
-			lines = append(lines, parent.String())
-		}
-	}
-	return strings.Join(lines, "\n")
-}
-
-// ParseFile parses a `File` object from its encoded form.
-//
-// The input string must match the form returned by the `File.String` method.
-func ParseFile(encoded string) (*File, error) {
-	if len(encoded) == 0 {
-		return nil, nil
-	}
-	lines := strings.Split(string(encoded), "\n")
-	if len(lines) < 2 {
-		return nil, fmt.Errorf("malformed file metadata: %q", encoded)
-	}
-	var hashes []*Hash
-	for i, line := range lines[1:] {
-		hash, err := ParseHash(line)
-		if err != nil {
-			return nil, fmt.Errorf("failure parsing the hash %q: %v", line, err)
-		}
-		if hash != nil {
-			hashes = append(hashes, hash)
-		} else if i == 0 {
-			return nil, fmt.Errorf("missing contents for the encoded file %q", encoded)
-		}
+	if prev != nil && prev.Mode == modeLine && prev.Contents.Equal(contentsHash) {
+		// The file is unchanged from the last snapshot...
+		return prevFileHash, prev, nil
 	}
 	f := &File{
-		Mode:     lines[0],
-		Contents: hashes[0],
-		Parents:  hashes[1:],
+		Contents: contentsHash,
+		Mode:     modeLine,
 	}
-	return f, nil
+	if prev != nil {
+		f.Parents = []*Hash{prevFileHash}
+	}
+	h, err := s.StoreSnapshot(ctx, p, f)
+	if err != nil {
+		return nil, nil,fmt.Errorf("failure saving the latest file metadata for %q: %v", p, err)
+	}
+	return h, f, nil
 }
 
-// Permissions returns the permission subset of the file mode.
-//
-// The returned `os.FileMode` object does not include any information
-// on the file type (e.g. directory vs. link, etc).
-func (f *File) Permissions() os.FileMode {
-	if f == nil || len(f.Mode) < 9 {
-		// This is not a Posix-style mode line; default to 0700
-		return os.FileMode(0700)
+func readCached(ctx context.Context, s Storage, p Path, info os.FileInfo) (*Hash, *File, bool) {
+	if !s.PathInfoMatchesCache(ctx, p, info) {
+		return nil, nil, false
 	}
-	permStr := f.Mode[len(f.Mode)-9:]
-	perm := fs.ModePerm
-	for i, c := range permStr {
-		if c == '-' {
-			perm ^= (1 << uint(8-i))
+	cachedHash, cachedFile, err := s.FindSnapshot(ctx, p)
+	if err != nil {
+		return nil, nil, false
+	}
+	return cachedHash, cachedFile, true
+}
+
+func snapshotRegularFile(ctx context.Context, s Storage, p Path, info os.FileInfo, contents io.Reader) (h *Hash, f *File, err error) {
+	if cachedHash, cachedFile, ok := readCached(ctx, s, p, info); ok {
+		return cachedHash, cachedFile, nil
+	}
+	defer func() {
+		if err == nil && h != nil {
+			s.CachePathInfo(ctx, p, info)
+		}
+	}()
+	h, err = s.StoreObject(ctx, contents)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failure storing an object: %v", err)
+	}
+	return snapshotFileMetadata(ctx, s, p, info, h)
+}
+
+func snapshotDirectory(ctx context.Context, s Storage, p Path, info os.FileInfo, contents *os.File) (*Hash, *File, error) {
+	entries, err := contents.ReadDir(0)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failure reading the filesystem contents of the directory %q: %v", p, err)
+	}
+	childHashes := make(Tree)
+	for _, entry := range entries {
+		childPath := Path(filepath.Join(string(p), entry.Name()))
+		childHash, _, err := Current(ctx, s, childPath)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failure hashing the child dir %q: %v", childPath, err)
+		}
+		if childHash != nil {
+			childHashes[Path(entry.Name())] = childHash
 		}
 	}
-	return perm
+	contentsJson := []byte(childHashes.String())
+	contentsHash, err := s.StoreObject(ctx, bytes.NewReader(contentsJson))
+	return snapshotFileMetadata(ctx, s, p, info, contentsHash)
+}
+
+func snapshotLink(ctx context.Context, s Storage, p Path, info os.FileInfo) (*Hash, *File, error) {
+	target, err := os.Readlink(string(p))
+	if err != nil {
+		return nil, nil, fmt.Errorf("failure reading the link target for %q: %v", p, err)
+	}
+
+	h, err := s.StoreObject(ctx, strings.NewReader(target))
+	if err != nil {
+		return nil, nil, fmt.Errorf("failure storing an object: %v", err)
+	}
+	return snapshotFileMetadata(ctx, s, p, info, h)
+}
+
+// Current generates a snapshot for the given path, stored in the given store.
+//
+// The passed in path must be an absolute path.
+//
+// The returned value is the hash of the generated `snapshot.File` object.
+func Current(ctx context.Context, s Storage, p Path) (*Hash, *File, error) {
+	if s.Exclude(p) {
+		// We are not supposed to store snapshots for the given path, so pretend it does not exist.
+		return nil, nil, nil
+	}
+	stat, err := os.Lstat(string(p))
+	if os.IsNotExist(err) {
+		// The referenced file does not exist, so the corresponding
+		// hash should be nil.
+		return nil, nil, nil
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("failure reading the file stat for %q: %v", p, err)
+	}
+	if stat.Mode()&fs.ModeSymlink != 0 {
+		return snapshotLink(ctx, s, p, stat)
+	}
+	contents, err := os.Open(string(p))
+	if os.IsNotExist(err) {
+		// The file we tried to open no longer exists.
+		//
+		// This could happen if there is a race condition where the
+		// file was deleted before we could read it. In that case,
+		// return an empty snapshot.
+		return nil, nil, nil
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("failure reading the file %q: %v", p, err)
+	}
+	defer contents.Close()
+
+	info, err := contents.Stat()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failure reading the filesystem metadata for %q: %v", p, err)
+	}
+	if info.IsDir() {
+		return snapshotDirectory(ctx, s, p, info, contents)
+	} else {
+		return snapshotRegularFile(ctx, s, p, info, contents)
+	}
 }

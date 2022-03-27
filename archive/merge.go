@@ -143,7 +143,7 @@ func Merge(ctx context.Context, s *Store, src *snapshot.Hash, dest snapshot.Path
 	if err := os.MkdirAll(destParent, os.FileMode(0700)); err != nil {
 		return fmt.Errorf("failure ensuring the parent directory of %q exists: %v", dest, err)
 	}
-	destPrevHash, err := Snapshot(ctx, s, dest)
+	destPrevHash, _, err := snapshot.Current(ctx, s, dest)
 	if err != nil {
 		return fmt.Errorf("failure generating snapshot of destination %q prior to merging: %v", dest, err)
 	}

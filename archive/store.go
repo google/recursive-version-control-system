@@ -90,6 +90,10 @@ func (s *Store) ReadObject(ctx context.Context, h *snapshot.Hash) (io.ReadCloser
 	return os.Open(filepath.Join(objPath, objName))
 }
 
+func (s *Store) mappedPathsDir(p snapshot.Path) string {
+	return filepath.Join(s.ArchiveDir, "mappedPaths", string(p))
+}
+
 func (s *Store) pathHashFile(p snapshot.Path) (dir string, name string, err error) {
 	pathHash, err := snapshot.NewHash(strings.NewReader(string(p)))
 	if err != nil {
@@ -100,6 +104,9 @@ func (s *Store) pathHashFile(p snapshot.Path) (dir string, name string, err erro
 }
 
 func (s *Store) StoreSnapshot(ctx context.Context, p snapshot.Path, f *snapshot.File) (*snapshot.Hash, error) {
+	if err := os.MkdirAll(s.mappedPathsDir(p), 0700); err != nil {
+		return nil, fmt.Errorf("failure creating the mapped paths dir entry for %q: %v", p, err)
+	}
 	bs := []byte(f.String())
 	h, err := s.StoreObject(ctx, bytes.NewReader(bs))
 	if err != nil {
@@ -114,6 +121,29 @@ func (s *Store) StoreSnapshot(ctx context.Context, p snapshot.Path, f *snapshot.
 	}
 	if err := os.WriteFile(filepath.Join(pathHashDir, pathHashFile), []byte(h.String()), 0600); err != nil {
 		return nil, fmt.Errorf("failure writing the hash for path %q: %v", p, err)
+	}
+	var currTree snapshot.Tree
+	if f.IsDir() {
+		currTree, err = s.ListDirectorySnapshotContents(ctx, h, f)
+		if err != nil {
+			return nil, fmt.Errorf("failure listing the contents of the new snapshot: %v", err)
+		}
+	}
+	mappedSubPaths, err := os.ReadDir(s.mappedPathsDir(p))
+	if err != nil {
+		for _, entry := range mappedSubPaths {
+			child := snapshot.Path(entry.Name())
+			if currTree != nil {
+				if _, ok := currTree[child]; ok {
+					continue
+				}
+			}
+			// The previous child entry was removed.
+			subpath := p.Join(child)
+			if err := s.RemoveMappingForPath(ctx, subpath); err != nil {
+				return nil, fmt.Errorf("failure removing path mapping for removed child %q: %v", child, err)
+			}
+		}
 	}
 	return h, nil
 }
@@ -179,13 +209,15 @@ func (s *Store) ListDirectorySnapshotContents(ctx context.Context, h *snapshot.H
 }
 
 func (s *Store) RemoveMappingForPath(ctx context.Context, p snapshot.Path) error {
+	if err := os.RemoveAll(s.mappedPathsDir(p)); err != nil {
+		return fmt.Errorf("failure removing the mapped paths entry for %q: %v", p, err)
+	}
 	h, f, err := s.FindSnapshot(ctx, p)
 	if os.IsNotExist(err) {
 		// There is no file snapshot corresponding to the given path,
 		// so we have nothing to do.
 		return nil
 	}
-
 	pathHashDir, pathHashFile, err := s.pathHashFile(p)
 	if err != nil {
 		return fmt.Errorf("failure calculating the path hash file location for %q: %v", p, err)
