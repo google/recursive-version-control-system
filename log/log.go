@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package archive
+// Package log provides methods for extracting the log of changes for a snapshot.
+package log
 
 import (
 	"context"

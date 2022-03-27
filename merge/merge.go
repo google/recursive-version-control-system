@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package archive
+// Package merge defines methods for merging two snapshots together.
+package merge
 
 import (
 	"context"
@@ -22,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/google/recursive-version-control-system/log"
 	"github.com/google/recursive-version-control-system/snapshot"
 	"github.com/google/recursive-version-control-system/storage"
 )
@@ -109,7 +111,7 @@ func MergeBase(ctx context.Context, s *storage.LocalFiles, lhs, rhs *snapshot.Ha
 	if lhs == nil || rhs == nil {
 		return nil, nil
 	}
-	lhsLog, err := ReadLog(ctx, s, lhs)
+	lhsLog, err := log.ReadLog(ctx, s, lhs)
 	if err != nil {
 		return nil, fmt.Errorf("failure reading the log for %q: %v", lhs, err)
 	}
@@ -117,7 +119,7 @@ func MergeBase(ctx context.Context, s *storage.LocalFiles, lhs, rhs *snapshot.Ha
 	for _, e := range lhsLog {
 		lhsAncestors[*e.Hash] = struct{}{}
 	}
-	rhsLog, err := ReadLog(ctx, s, rhs)
+	rhsLog, err := log.ReadLog(ctx, s, rhs)
 	if err != nil {
 		return nil, fmt.Errorf("failure reading the log for %q: %v", rhs, err)
 	}

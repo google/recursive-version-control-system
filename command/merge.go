@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/google/recursive-version-control-system/archive"
+	"github.com/google/recursive-version-control-system/merge"
 	"github.com/google/recursive-version-control-system/snapshot"
 	"github.com/google/recursive-version-control-system/storage"
 )
@@ -47,7 +47,7 @@ func mergeCommand(ctx context.Context, s *storage.LocalFiles, cmd string, args [
 	if err != nil {
 		return 1, fmt.Errorf("failure determining the absolute path of %q: %v", args[1], err)
 	}
-	if err := archive.Merge(ctx, s, h, snapshot.Path(abs)); err != nil {
+	if err := merge.Merge(ctx, s, h, snapshot.Path(abs)); err != nil {
 		return 1, fmt.Errorf("failure merging %q into %q: %v", h, abs, err)
 	}
 	return 0, nil

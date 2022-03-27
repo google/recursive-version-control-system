@@ -20,7 +20,7 @@ import (
 	"flag"
 	"fmt"
 
-	"github.com/google/recursive-version-control-system/archive"
+	"github.com/google/recursive-version-control-system/log"
 	"github.com/google/recursive-version-control-system/storage"
 )
 
@@ -33,11 +33,11 @@ func logCommand(ctx context.Context, s *storage.LocalFiles, cmd string, args []s
 	if err != nil {
 		return 1, fmt.Errorf("failure resolving the snapshot hash for %q: %v", args[0], err)
 	}
-	entries, err := archive.ReadLog(ctx, s, h)
+	entries, err := log.ReadLog(ctx, s, h)
 	if err != nil {
 		return 1, fmt.Errorf("failure reading the log for %q: %v", args[0], err)
 	}
-	summaries, err := archive.SummarizeLog(ctx, s, entries)
+	summaries, err := log.SummarizeLog(ctx, s, entries)
 	if err != nil {
 		return 1, fmt.Errorf("failure summarizing log entries for %q: %v", args[0], err)
 	}
