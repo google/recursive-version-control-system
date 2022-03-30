@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // Storage defines persistent storage of snapshots.
@@ -73,7 +74,7 @@ func snapshotFileMetadata(ctx context.Context, s Storage, p Path, info os.FileIn
 	}
 	h, err := s.StoreSnapshot(ctx, p, f)
 	if err != nil {
-		return nil, nil,fmt.Errorf("failure saving the latest file metadata for %q: %v", p, err)
+		return nil, nil, fmt.Errorf("failure saving the latest file metadata for %q: %v", p, err)
 	}
 	return h, f, nil
 }
@@ -89,14 +90,36 @@ func readCached(ctx context.Context, s Storage, p Path, info os.FileInfo) (*Hash
 	return cachedHash, cachedFile, true
 }
 
+// timeNow is a handle on `time.Now` that lets us replace it for simulating the passage of time in unit tests.
+var timeNow func() time.Time = time.Now
+
 func snapshotRegularFile(ctx context.Context, s Storage, p Path, info os.FileInfo, contents io.Reader) (h *Hash, f *File, err error) {
+	startTimeSec := timeNow().Truncate(time.Second)
 	if cachedHash, cachedFile, ok := readCached(ctx, s, p, info); ok {
 		return cachedHash, cachedFile, nil
 	}
 	defer func() {
-		if err == nil && h != nil {
-			s.CachePathInfo(ctx, p, info)
+		// Cache the path info if appropriate...
+		if err != nil || h == nil {
+			// We did not construct a snapshot, so nothing to cache
+			return
 		}
+		latestInfo, err := os.Lstat(string(p))
+		if err != nil {
+			// We could not determine if the file has changed during snapshotting, so don't cache.
+			return
+		}
+		if !latestInfo.ModTime().Equal(info.ModTime()) {
+			// The file changed while we were snapshotting it; don't cache anything
+			return
+		}
+		if !latestInfo.ModTime().Before(startTimeSec.Add(-1 * time.Second)) {
+			// The file timestamp matches when we started, so there's a potential
+			// race condition where it might have updated after we snapshotted,
+			// and we should not cache it.
+			return
+		}
+		s.CachePathInfo(ctx, p, info)
 	}()
 	h, err = s.StoreObject(ctx, contents)
 	if err != nil {

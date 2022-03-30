@@ -24,6 +24,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // storageForTest defines persistent storage of snapshots.
@@ -31,8 +32,8 @@ type storageForTest struct {
 	mu           sync.Mutex
 	objects      map[Hash][]byte
 	snapshots    map[Path]*Hash
-	enableCache  bool
 	cache        map[Path]os.FileInfo
+	cacheModTime map[Path]time.Time
 }
 
 // StoreObject persists the contents of the given reader, returning the resulting hash of those contents.
@@ -116,7 +117,11 @@ func (s *storageForTest) CachePathInfo(ctx context.Context, p Path, info os.File
 	if s.cache == nil {
 		s.cache = make(map[Path]os.FileInfo)
 	}
+	if s.cacheModTime == nil {
+		s.cacheModTime = make(map[Path]time.Time)
+	}
 	s.cache[p] = info
+	s.cacheModTime[p] = info.ModTime()
 	return nil
 }
 
@@ -124,7 +129,7 @@ func (s *storageForTest) CachePathInfo(ctx context.Context, p Path, info os.File
 // information matches the file information that was previously cached
 // for the given path.
 func (s *storageForTest) PathInfoMatchesCache(ctx context.Context, p Path, info os.FileInfo) bool {
-	if s == nil || !s.enableCache {
+	if s == nil {
 		return false
 	}
 	s.mu.Lock()
@@ -136,69 +141,34 @@ func (s *storageForTest) PathInfoMatchesCache(ctx context.Context, p Path, info 
 	if !ok {
 		return false
 	}
-	return os.SameFile(cached, info)
+	cachedModTime, ok := s.cacheModTime[p]
+	if !ok {
+		return false
+	}
+	return os.SameFile(cached, info) && cachedModTime.Equal(info.ModTime())
 }
+
+// timeNowMutex is a mutex to make sure that no two test runs try to modify the `timeNow` package variable simultaneously.
+//
+// Our unit tests sometimes modify the `timeNow` package variable for testing purposes.
+//
+// This means that if the test runs multiple times in parallel, then they can stomp
+// on each other causing spurious test failures. To prevent that we first aqcuire this lock.
+var timeNowMutex sync.Mutex
 
 func TestCurrentSingleFile(t *testing.T) {
-	dir, err := os.MkdirTemp("", "snapshotTesting")
-	if err != nil {
-		t.Fatalf("failure creating the temporary testing directory: %v", err)
-	}
-	defer os.RemoveAll(dir)
-
+	timeNowMutex.Lock()
+	defer timeNowMutex.Unlock()
+	defer func() { timeNow = time.Now }()
+	dir := t.TempDir()
 	file := filepath.Join(dir, "example.txt")
-	if err := os.WriteFile(file, []byte("Hello, World!"), 0700); err != nil {
-		t.Fatalf("failure creating the example file to snapshot: %v", err)
-	}
 	p := Path(file)
 	s := &storageForTest{}
-	h1, f1, err := Current(context.Background(), s, p)
-	if err != nil {
-		t.Errorf("failure creating the initial snapshot for the file: %v", err)
-	} else if h1 == nil {
-		t.Error("unexpected nil hash for the file")
-	} else if f1 == nil {
-		t.Error("unexpected nil snapshot for the file")
-	}
-	h2, f2, err := Current(context.Background(), s, p)
-	if err != nil {
-		t.Errorf("failure replicating the initial snapshot for the file: %v", err)
-	} else if got, want := h2, h1; !got.Equal(want) {
-		t.Errorf("unexpected hash for the file; got %q, want %q", got, want)
-	} else if got, want := f2.String(), f1.String(); got != want {
-		t.Errorf("unexpected snapshot for the file; got %q, want %q", got, want)
-	}
 
-	if err := os.WriteFile(file, []byte("Goodbye, World!"), 0700); err != nil {
-		t.Fatalf("failure updating the example file to snapshot: %v", err)
-	}
-	h3, f3, err := Current(context.Background(), s, p)
-	if err != nil {
-		t.Errorf("failure creating the updated snapshot for the file: %v", err)
-	} else if h3 == nil {
-		t.Error("unexpected nil hash for the updated file")
-	} else if f3 == nil {
-		t.Error("unexpected nil snapshot for the updated file")
-	} else if h3.Equal(h1) {
-		t.Error("failed to update the snapshot")
-	} else if !f3.Parents[0].Equal(h1) {
-		t.Errorf("updated snapshot did not include the original as its parent: %q", f3)
-	}
-}
-
-func TestCurrentSingleFileWithCacheCheck(t *testing.T) {
-	dir, err := os.MkdirTemp("", "snapshotTesting")
-	if err != nil {
-		t.Fatalf("failure creating the temporary testing directory: %v", err)
-	}
-	defer os.RemoveAll(dir)
-
-	file := filepath.Join(dir, "example.txt")
+	// Take an initial snapshot
 	if err := os.WriteFile(file, []byte("Hello, World!"), 0700); err != nil {
 		t.Fatalf("failure creating the example file to snapshot: %v", err)
 	}
-	p := Path(file)
-	s := &storageForTest{enableCache: true}
 	h1, f1, err := Current(context.Background(), s, p)
 	if err != nil {
 		t.Errorf("failure creating the initial snapshot for the file: %v", err)
@@ -208,9 +178,7 @@ func TestCurrentSingleFileWithCacheCheck(t *testing.T) {
 		t.Error("unexpected nil snapshot for the file")
 	}
 
-	if err := os.WriteFile(file, []byte("Goodbye, World!"), 0700); err != nil {
-		t.Fatalf("failure updating the example file to snapshot: %v", err)
-	}
+	// Verify that we can take the snapshot again without it changing
 	h2, f2, err := Current(context.Background(), s, p)
 	if err != nil {
 		t.Errorf("failure replicating the initial snapshot for the file: %v", err)
@@ -220,7 +188,10 @@ func TestCurrentSingleFileWithCacheCheck(t *testing.T) {
 		t.Errorf("unexpected snapshot for the file; got %q, want %q", got, want)
 	}
 
-	s.enableCache = false
+	// Modify the file and verify that the snapshot both changes and points to the parent
+	if err := os.WriteFile(file, []byte("Goodbye, World!"), 0700); err != nil {
+		t.Fatalf("failure updating the example file to snapshot: %v", err)
+	}
 	h3, f3, err := Current(context.Background(), s, p)
 	if err != nil {
 		t.Errorf("failure creating the updated snapshot for the file: %v", err)
@@ -232,5 +203,53 @@ func TestCurrentSingleFileWithCacheCheck(t *testing.T) {
 		t.Error("failed to update the snapshot")
 	} else if !f3.Parents[0].Equal(h1) {
 		t.Errorf("updated snapshot did not include the original as its parent: %q", f3)
+	}
+
+	// Force the snapshot to be cached
+	prevInfo, err := os.Stat(file)
+	if err != nil {
+		t.Fatalf("failure reading the file info for our test file: %v", err)
+	}
+	timeNow = func() time.Time { return prevInfo.ModTime().Truncate(time.Second).Add(time.Second) }
+	h4, _, err := Current(context.Background(), s, p)
+	if err != nil {
+		t.Errorf("failure creating the updated snapshot for the file: %v", err)
+	} else if got, want := h4, h3; !got.Equal(want) {
+		t.Errorf("unexpected hash for unchanged file: got %q, want %q", got, want)
+	}
+
+	// Verify that we can read from the cache
+	h5, _, err := Current(context.Background(), s, p)
+	if err != nil {
+		t.Errorf("failure reading the cached snapshot for the file: %v", err)
+	} else if got, want := h5, h3; !got.Equal(want) {
+		t.Errorf("unexpected hash for unchanged file: got %q, want %q", got, want)
+	}
+
+	// Update the file to make sure the cache is bypassed
+	// We have to make sure that the updated mod time is after the cached mod time.
+	// These file times are (on Unix systems) seconds, so we have to wait for one
+	// second more.
+	prevInfo, err = os.Stat(file)
+	if err != nil {
+		t.Fatalf("failure reading the file info for our test file: %v", err)
+	}
+	firstValidTime := prevInfo.ModTime().Truncate(time.Second).Add(time.Second)
+	currTime := time.Now()
+	if firstValidTime.After(currTime) {
+		time.Sleep(firstValidTime.Sub(currTime))
+	}
+	if err := os.WriteFile(file, []byte("I'm back, World!"), 0700); err != nil {
+		t.Fatalf("failure updating the example file to snapshot: %v", err)
+	}
+	h6, f6, err := Current(context.Background(), s, p)
+	if err != nil {
+		t.Errorf("failure updating the cached snapshot for the file: %v", err)
+	} else if h6.Equal(h5) {
+		t.Error("failed to update the cached snapshot")
+	} else if f6 == nil {
+		t.Error("failed to read the update to the cached snapshot")
+	} else if len(f6.Parents) == 0 || !f6.Parents[0].Equal(h5) {
+		t.Error("failed to set the cached snapshot as the first parent of the update to the cached snapshot")
 	}
 }
