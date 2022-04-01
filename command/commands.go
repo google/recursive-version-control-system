@@ -29,6 +29,7 @@ type command func(context.Context, *storage.LocalFiles, string, []string) (int, 
 
 var (
 	commandMap = map[string]command{
+		"export":   exportCommand,
 		"log":      logCommand,
 		"merge":    mergeCommand,
 		"snapshot": snapshotCommand,
@@ -38,6 +39,7 @@ var (
 
 Where <SUBCOMMAND> is one of:
 
+	export
 	log
 	merge
 	snapshot
