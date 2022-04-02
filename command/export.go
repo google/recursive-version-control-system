@@ -19,6 +19,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,6 +41,14 @@ var (
 	exportSnapshotsFlag = exportFlags.String(
 		"snapshots", "",
 		"comma separated list of snapshots to include in the exported bundle")
+	exportExcludeFlag = exportFlags.String(
+		"exclude", "",
+		("comma separated list of objects to exclude from the exported bundle." +
+			"This takes precedence over the `snapshots` flag, so a hash specified " +
+			"in both flags will not be included in the bundle."))
+	exportMetadataFlag = exportFlags.String(
+		"metadata", "",
+		"comma separated list of key=value pairs to include in the exported bundle")
 )
 
 func exportCommand(ctx context.Context, s *storage.LocalFiles, cmd string, args []string) (int, error) {
@@ -59,6 +68,9 @@ func exportCommand(ctx context.Context, s *storage.LocalFiles, cmd string, args 
 
 	var snapshots []*snapshot.Hash
 	for _, s := range strings.Split(*exportSnapshotsFlag, ",") {
+		if len(s) == 0 {
+			continue
+		}
 		h, err := snapshot.ParseHash(s)
 		if err != nil {
 			return 1, fmt.Errorf("failure parsing snapshot hash %q: %v", s, err)
@@ -66,6 +78,32 @@ func exportCommand(ctx context.Context, s *storage.LocalFiles, cmd string, args 
 		if h != nil {
 			snapshots = append(snapshots, h)
 		}
+	}
+
+	var exclude []*snapshot.Hash
+	for _, e := range strings.Split(*exportExcludeFlag, ",") {
+		if len(e) == 0 {
+			continue
+		}
+		h, err := snapshot.ParseHash(e)
+		if err != nil {
+			return 1, fmt.Errorf("failure parsing exclude hash %q: %v", e, err)
+		}
+		if h != nil {
+			exclude = append(exclude, h)
+		}
+	}
+
+	metadata := make(map[string]io.Reader)
+	for _, pair := range strings.Split(*exportMetadataFlag, ",") {
+		if len(pair) == 0 {
+			continue
+		}
+		parts := strings.Split(pair, "=")
+		if len(parts) != 2 {
+			return 1, fmt.Errorf("malformed key=value pair %q", pair)
+		}
+		metadata[parts[0]] = strings.NewReader(parts[1])
 	}
 
 	path, err := filepath.Abs(args[0])
@@ -77,7 +115,7 @@ func exportCommand(ctx context.Context, s *storage.LocalFiles, cmd string, args 
 	if err != nil {
 		return 1, fmt.Errorf("failure opening the file %q: %v", path, err)
 	}
-	if err := bundle.Export(ctx, s, out, snapshots); err != nil {
+	if err := bundle.Export(ctx, s, out, snapshots, exclude, metadata); err != nil {
 		return 1, fmt.Errorf("failure creating the bundle: %v\n", err)
 	}
 	return 0, nil

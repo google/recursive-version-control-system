@@ -20,45 +20,111 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"path"
 
 	"github.com/google/recursive-version-control-system/snapshot"
 	"github.com/google/recursive-version-control-system/storage"
 )
 
-func addFileToZipWriter(ctx context.Context, s *storage.LocalFiles, w *zip.Writer, h *snapshot.Hash, f *snapshot.File) ([]*snapshot.Hash, error) {
-	fw, err := w.Create(fmt.Sprintf("%s/%s", h.Function(), h.HexContents()))
-	if err != nil {
-		return nil, fmt.Errorf("failure creating the zip file entry for %q: %v", h, err)
+func bundleEntryPath(h *snapshot.Hash) string {
+	if len(h.HexContents()) > 4 {
+		return path.Join("objects", h.Function(), h.HexContents()[0:2], h.HexContents()[2:4], h.HexContents()[4:])
 	}
-	if _, err := fw.Write([]byte(f.String())); err != nil {
-		return nil, fmt.Errorf("failure writing the zip file entry for %q: %v", h, err)
+	if len(h.HexContents()) > 2 {
+		return path.Join("objects", h.Function(), h.HexContents()[0:2], h.HexContents()[2:])
+	}
+	return path.Join("objects", h.Function(), h.HexContents())
+}
+
+type ZipWriter struct {
+	nested  *zip.Writer
+	visited map[snapshot.Hash]struct{}
+	exclude map[snapshot.Hash]struct{}
+}
+
+func NewZipWriter(w io.Writer, exclude []*snapshot.Hash, metadata map[string]io.Reader) (*ZipWriter, error) {
+	excludeMap := make(map[snapshot.Hash]struct{})
+	for _, h := range exclude {
+		excludeMap[*h] = struct{}{}
+	}
+	nested := zip.NewWriter(w)
+	for name, r := range metadata {
+		fw, err := nested.Create(path.Join("metadata", name))
+		if err != nil {
+			return nil, fmt.Errorf("failure creating a zip file entry for metadata key %q: %v", name, err)
+		}
+		if _, err := io.Copy(fw, r); err != nil {
+			return nil, fmt.Errorf("failure writing the zip file entry for metadata key %q: %v", name, err)
+		}
+	}
+	return &ZipWriter{
+		nested:  nested,
+		visited: make(map[snapshot.Hash]struct{}),
+		exclude: excludeMap,
+	}, nil
+}
+
+func (w *ZipWriter) Close() error {
+	return w.nested.Close()
+}
+
+func (w *ZipWriter) AddObject(ctx context.Context, s *storage.LocalFiles, h *snapshot.Hash) error {
+	if _, ok := w.exclude[*h]; ok {
+		// We are explicitly excluding this object.
+		return nil
+	}
+	if _, ok := w.visited[*h]; ok {
+		// We already added this to the zip writer.
+		return nil
+	}
+	w.visited[*h] = struct{}{}
+	r, err := s.ReadObject(ctx, h)
+	if err != nil {
+		return fmt.Errorf("failure opening the contents of the object %q: %v", h, err)
+	}
+	fw, err := w.nested.Create(bundleEntryPath(h))
+	if err != nil {
+		return fmt.Errorf("failure creating the zip file entry for %q: %v", h, err)
+	}
+	if _, err := io.Copy(fw, r); err != nil {
+		return fmt.Errorf("failure writing the zip file entry for %q: %v", h, err)
+	}
+	return nil
+}
+
+func (w *ZipWriter) AddFile(ctx context.Context, s *storage.LocalFiles, h *snapshot.Hash, f *snapshot.File) error {
+	if err := w.AddObject(ctx, s, h); err != nil {
+		return fmt.Errorf("failure adding the snapshot %q to the bundle: %v", h, err)
 	}
 	if f.Contents == nil {
-		return nil, nil
+		return nil
 	}
-	if f.IsDir() {
-		tree, err := s.ListDirectorySnapshotContents(ctx, h, f)
+	if err := w.AddObject(ctx, s, f.Contents); err != nil {
+		return fmt.Errorf("failure adding the contents of the snapshot %q to the bundle: %v", h, err)
+	}
+	if !f.IsDir() {
+		return nil
+	}
+	tree, err := s.ListDirectorySnapshotContents(ctx, h, f)
+	if err != nil {
+		return fmt.Errorf("failure reading the contents of the directory snapshot %q: %v", h, err)
+	}
+	for _, childHash := range tree {
+		if _, ok := w.exclude[*childHash]; ok {
+			continue
+		}
+		if _, ok := w.visited[*childHash]; ok {
+			continue
+		}
+		child, err := s.ReadSnapshot(ctx, childHash)
 		if err != nil {
-			return nil, fmt.Errorf("failure reading the contents of the directory snapshot %q: %v", h, err)
+			return fmt.Errorf("failure reading the snapshot %q: %v", childHash, err)
 		}
-		var next []*snapshot.Hash
-		for _, childHash := range tree {
-			next = append(next, childHash)
+		if err := w.AddFile(ctx, s, childHash, child); err != nil {
+			return fmt.Errorf("failure adding the child %q to the bundle: %v", childHash, err)
 		}
-		return next, nil
 	}
-	contentsReader, err := s.ReadObject(ctx, f.Contents)
-	if err != nil {
-		return nil, fmt.Errorf("failure opening the contents of the link snapshot %q: %v", h, err)
-	}
-	cw, err := w.Create(fmt.Sprintf("%s/%s", f.Contents.Function(), f.Contents.HexContents()))
-	if err != nil {
-		return nil, fmt.Errorf("failure creating the zip file entry for the contents %q: %v", f.Contents, err)
-	}
-	if _, err := io.Copy(cw, contentsReader); err != nil {
-		return nil, fmt.Errorf("failure writing the zip file entry for the contents %q: %v", f.Contents, err)
-	}
-	return nil, nil
+	return nil
 }
 
 // Export writes a bundle with the specified snapshots to the given writer.
@@ -67,8 +133,18 @@ func addFileToZipWriter(ctx context.Context, s *storage.LocalFiles, w *zip.Write
 // specified snapshots, and their contents. For any snapshots of a directory,
 // the bundle will also recursively include the snapshots for the children
 // of that directory.
-func Export(ctx context.Context, s *storage.LocalFiles, w io.Writer, snapshots []*snapshot.Hash) (err error) {
-	zw := zip.NewWriter(w)
+//
+// The `exclude` argument specifies a list of objects (by hash) that will
+// not be included in the resulting bundle even if they otherwise would
+// have been.
+//
+// The `metadata` argument specifies an additional map of key/value pairs
+// to include in the bundle in a separate subpath from the bundled objects.
+func Export(ctx context.Context, s *storage.LocalFiles, w io.Writer, snapshots []*snapshot.Hash, exclude []*snapshot.Hash, metadata map[string]io.Reader) (err error) {
+	zw, err := NewZipWriter(w, exclude, metadata)
+	if err != nil {
+		return fmt.Errorf("failure creating the zip writer for the bundle: %v", err)
+	}
 	defer func() {
 		ce := zw.Close()
 		if err == nil {
@@ -76,26 +152,14 @@ func Export(ctx context.Context, s *storage.LocalFiles, w io.Writer, snapshots [
 		}
 	}()
 
-	visited := make(map[snapshot.Hash]struct{})
-	for len(snapshots) > 0 {
-		var next []*snapshot.Hash
-		for _, h := range snapshots {
-			visited[*h] = struct{}{}
-			f, err := s.ReadSnapshot(ctx, h)
-			if err != nil {
-				return fmt.Errorf("failure reading the snapshot %q: %v", h, err)
-			}
-			children, err := addFileToZipWriter(ctx, s, zw, h, f)
-			if err != nil {
-				return fmt.Errorf("failure adding %q to the zip file: %v", h, err)
-			}
-			for _, childHash := range children {
-				if _, ok := visited[*childHash]; !ok {
-					next = append(next, childHash)
-				}
-			}
+	for _, h := range snapshots {
+		f, err := s.ReadSnapshot(ctx, h)
+		if err != nil {
+			return fmt.Errorf("failure reading the snapshot %q: %v", h, err)
 		}
-		snapshots = next
+		if err := zw.AddFile(ctx, s, h, f); err != nil {
+			return fmt.Errorf("failure adding %q to the zip file: %v", h, err)
+		}
 	}
 	return nil
 }
