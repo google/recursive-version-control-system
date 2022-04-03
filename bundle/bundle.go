@@ -82,6 +82,7 @@ func (w *ZipWriter) AddObject(ctx context.Context, s *storage.LocalFiles, h *sna
 	if err != nil {
 		return fmt.Errorf("failure opening the contents of the object %q: %v", h, err)
 	}
+	defer r.Close()
 	fw, err := w.nested.Create(bundleEntryPath(h))
 	if err != nil {
 		return fmt.Errorf("failure creating the zip file entry for %q: %v", h, err)
