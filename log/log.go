@@ -186,26 +186,31 @@ func SummarizeLog(ctx context.Context, s *storage.LocalFiles, entries []*LogEntr
 	return result, nil
 }
 
-func ReadLog(ctx context.Context, s *storage.LocalFiles, h *snapshot.Hash) ([]*LogEntry, error) {
+func ReadLog(ctx context.Context, s *storage.LocalFiles, h *snapshot.Hash, maxDepth int) ([]*LogEntry, error) {
 	visited := make(map[snapshot.Hash]*snapshot.File)
 	queue := []*snapshot.Hash{h}
 	result := []*LogEntry{}
-	for len(queue) > 0 {
-		h, queue = queue[0], queue[1:]
-		f, err := s.ReadSnapshot(ctx, h)
-		if err != nil {
-			return nil, fmt.Errorf("failure reading the snapshot for %q: %v", h, err)
-		}
-		visited[*h] = f
-		result = append(result, &LogEntry{
-			Hash: h,
-			File: f,
-		})
-		for _, p := range f.Parents {
-			if _, ok := visited[*p]; !ok {
-				queue = append(queue, p)
+	var depth int
+	for len(queue) > 0 && depth != maxDepth {
+		var next []*snapshot.Hash
+		for _, h := range queue {
+			f, err := s.ReadSnapshot(ctx, h)
+			if err != nil {
+				return nil, fmt.Errorf("failure reading the snapshot for %q: %v", h, err)
+			}
+			visited[*h] = f
+			result = append(result, &LogEntry{
+				Hash: h,
+				File: f,
+			})
+			for _, p := range f.Parents {
+				if _, ok := visited[*p]; !ok {
+					next = append(next, p)
+				}
 			}
 		}
+		queue = next
+		depth++
 	}
 	return result, nil
 }

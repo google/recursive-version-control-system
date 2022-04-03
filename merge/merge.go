@@ -111,7 +111,7 @@ func MergeBase(ctx context.Context, s *storage.LocalFiles, lhs, rhs *snapshot.Ha
 	if lhs == nil || rhs == nil {
 		return nil, nil
 	}
-	lhsLog, err := log.ReadLog(ctx, s, lhs)
+	lhsLog, err := log.ReadLog(ctx, s, lhs, -1)
 	if err != nil {
 		return nil, fmt.Errorf("failure reading the log for %q: %v", lhs, err)
 	}
@@ -119,7 +119,7 @@ func MergeBase(ctx context.Context, s *storage.LocalFiles, lhs, rhs *snapshot.Ha
 	for _, e := range lhsLog {
 		lhsAncestors[*e.Hash] = struct{}{}
 	}
-	rhsLog, err := log.ReadLog(ctx, s, rhs)
+	rhsLog, err := log.ReadLog(ctx, s, rhs, -1)
 	if err != nil {
 		return nil, fmt.Errorf("failure reading the log for %q: %v", rhs, err)
 	}
