@@ -37,12 +37,13 @@ func bundleEntryPath(h *snapshot.Hash) string {
 }
 
 type ZipWriter struct {
-	nested  *zip.Writer
-	visited map[snapshot.Hash]struct{}
-	exclude map[snapshot.Hash]struct{}
+	nested         *zip.Writer
+	visited        map[snapshot.Hash]struct{}
+	exclude        map[snapshot.Hash]struct{}
+	recurseParents bool
 }
 
-func NewZipWriter(w io.Writer, exclude []*snapshot.Hash, metadata map[string]io.Reader) (*ZipWriter, error) {
+func NewZipWriter(w io.Writer, exclude []*snapshot.Hash, metadata map[string]io.Reader, recurseParents bool) (*ZipWriter, error) {
 	excludeMap := make(map[snapshot.Hash]struct{})
 	for _, h := range exclude {
 		excludeMap[*h] = struct{}{}
@@ -58,9 +59,10 @@ func NewZipWriter(w io.Writer, exclude []*snapshot.Hash, metadata map[string]io.
 		}
 	}
 	return &ZipWriter{
-		nested:  nested,
-		visited: make(map[snapshot.Hash]struct{}),
-		exclude: excludeMap,
+		nested:         nested,
+		visited:        make(map[snapshot.Hash]struct{}),
+		exclude:        excludeMap,
+		recurseParents: recurseParents,
 	}, nil
 }
 
@@ -125,6 +127,19 @@ func (w *ZipWriter) AddFile(ctx context.Context, s *storage.LocalFiles, h *snaps
 			return fmt.Errorf("failure adding the child %q to the bundle: %v", childHash, err)
 		}
 	}
+	if !w.recurseParents {
+		return nil
+	}
+	for _, parentHash := range f.Parents {
+		parent, err := s.ReadSnapshot(ctx, parentHash)
+		if err != nil {
+			// The history is incomplete
+			continue
+		}
+		if err := w.AddFile(ctx, s, parentHash, parent); err != nil {
+			return fmt.Errorf("failure adding the parent %q to the bundle: %v", parentHash, err)
+		}
+	}
 	return nil
 }
 
@@ -141,8 +156,8 @@ func (w *ZipWriter) AddFile(ctx context.Context, s *storage.LocalFiles, h *snaps
 //
 // The `metadata` argument specifies an additional map of key/value pairs
 // to include in the bundle in a separate subpath from the bundled objects.
-func Export(ctx context.Context, s *storage.LocalFiles, w io.Writer, snapshots []*snapshot.Hash, exclude []*snapshot.Hash, metadata map[string]io.Reader) (err error) {
-	zw, err := NewZipWriter(w, exclude, metadata)
+func Export(ctx context.Context, s *storage.LocalFiles, w io.Writer, snapshots []*snapshot.Hash, exclude []*snapshot.Hash, metadata map[string]io.Reader, recurseParents bool) (err error) {
+	zw, err := NewZipWriter(w, exclude, metadata, recurseParents)
 	if err != nil {
 		return fmt.Errorf("failure creating the zip writer for the bundle: %v", err)
 	}

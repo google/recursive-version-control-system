@@ -49,6 +49,9 @@ var (
 	exportMetadataFlag = exportFlags.String(
 		"metadata", "",
 		"comma separated list of key=value pairs to include in the exported bundle")
+	exportIncludeParentsFlag = exportFlags.Bool(
+		"include-parents", false,
+		"if true, then the exported bundle will recursively include the parents of selected snapshots")
 )
 
 func exportCommand(ctx context.Context, s *storage.LocalFiles, cmd string, args []string) (int, error) {
@@ -115,7 +118,7 @@ func exportCommand(ctx context.Context, s *storage.LocalFiles, cmd string, args 
 	if err != nil {
 		return 1, fmt.Errorf("failure opening the file %q: %v", path, err)
 	}
-	if err := bundle.Export(ctx, s, out, snapshots, exclude, metadata); err != nil {
+	if err := bundle.Export(ctx, s, out, snapshots, exclude, metadata, *exportIncludeParentsFlag); err != nil {
 		return 1, fmt.Errorf("failure creating the bundle: %v\n", err)
 	}
 	return 0, nil
