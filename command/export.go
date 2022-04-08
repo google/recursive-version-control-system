@@ -41,18 +41,108 @@ var (
 	exportSnapshotsFlag = exportFlags.String(
 		"snapshots", "",
 		"comma separated list of snapshots to include in the exported bundle")
+	exportSnapshotsFromFileFlag = exportFlags.String(
+		"snapshots-from-file", "",
+		"path to a file containing a comma separated list of snapshots to include in the exported bundle")
+
 	exportExcludeFlag = exportFlags.String(
 		"exclude", "",
 		("comma separated list of objects to exclude from the exported bundle." +
 			"This takes precedence over the `snapshots` flag, so a hash specified " +
 			"in both flags will not be included in the bundle."))
+	exportExcludeFromFileFlag = exportFlags.String(
+		"exclude-from-file", "",
+		"path to a file containing a comma separated list of objects to exclude in the exported bundle")
+
 	exportMetadataFlag = exportFlags.String(
 		"metadata", "",
 		"comma separated list of key=value pairs to include in the exported bundle")
+	exportMetadataFromFilesFlag = exportFlags.String(
+		"metadata-from-files", "",
+		"comma separated list of key=<PATH> pairs to include in the exported bundle. The <PATH> entries must be local files whose contents will be what is included.")
+
 	exportIncludeParentsFlag = exportFlags.Bool(
 		"include-parents", false,
 		"if true, then the exported bundle will recursively include the parents of selected snapshots")
+	exportVerboseFlag = exportFlags.Bool(
+		"v", false,
+		"verbose output. Print the hash of every object included in the exported bundle")
 )
+
+func readHashesFromFile(ctx context.Context, path string) ([]*snapshot.Hash, error) {
+	if path == "" {
+		return nil, nil
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failure reading hashes from the file %q: %v", path, err)
+	}
+	var hashes []*snapshot.Hash
+	for _, line := range strings.Split(string(contents), "\n") {
+		line = strings.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+		h, err := snapshot.ParseHash(line)
+		if err != nil {
+			return nil, fmt.Errorf("failure parsing file hash entry %q: %v", line, err)
+		}
+		if h != nil {
+			hashes = append(hashes, h)
+		}
+	}
+	return hashes, nil
+}
+
+func hashesFromFileAndFlag(ctx context.Context, fromFile, fromFlag string) ([]*snapshot.Hash, error) {
+	hashes, err := readHashesFromFile(ctx, fromFile)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, s := range strings.Split(fromFlag, ",") {
+		if len(s) == 0 {
+			continue
+		}
+		h, err := snapshot.ParseHash(s)
+		if err != nil {
+			return nil, fmt.Errorf("failure parsing flag hash entry %q: %v", s, err)
+		}
+		if h != nil {
+			hashes = append(hashes, h)
+		}
+	}
+	return hashes, nil
+}
+
+func metadataFromFilesAndFlag(ctx context.Context, fromFiles, fromFlag string) (map[string]io.ReadCloser, error) {
+	metadata := make(map[string]io.ReadCloser)
+	for _, pair := range strings.Split(fromFiles, ",") {
+		if len(pair) == 0 {
+			continue
+		}
+		parts := strings.Split(pair, "=")
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("malformed key=value pair %q", pair)
+		}
+		f, err := os.Open(parts[1])
+		if err != nil {
+			return nil, fmt.Errorf("failure opening the metadata file %q: %v", parts[1], err)
+		}
+		metadata[parts[0]] = f
+	}
+	for _, pair := range strings.Split(fromFlag, ",") {
+		if len(pair) == 0 {
+			continue
+		}
+		parts := strings.Split(pair, "=")
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("malformed key=value pair %q", pair)
+		}
+		metadata[parts[0]] = io.NopCloser(strings.NewReader(parts[1]))
+	}
+	return metadata, nil
+}
 
 func exportCommand(ctx context.Context, s *storage.LocalFiles, cmd string, args []string) (int, error) {
 	exportFlags.Usage = func() {
@@ -69,44 +159,17 @@ func exportCommand(ctx context.Context, s *storage.LocalFiles, cmd string, args 
 		return 1, nil
 	}
 
-	var snapshots []*snapshot.Hash
-	for _, s := range strings.Split(*exportSnapshotsFlag, ",") {
-		if len(s) == 0 {
-			continue
-		}
-		h, err := snapshot.ParseHash(s)
-		if err != nil {
-			return 1, fmt.Errorf("failure parsing snapshot hash %q: %v", s, err)
-		}
-		if h != nil {
-			snapshots = append(snapshots, h)
-		}
+	snapshots, err := hashesFromFileAndFlag(ctx, *exportSnapshotsFromFileFlag, *exportSnapshotsFlag)
+	if err != nil {
+		return 1, err
 	}
-
-	var exclude []*snapshot.Hash
-	for _, e := range strings.Split(*exportExcludeFlag, ",") {
-		if len(e) == 0 {
-			continue
-		}
-		h, err := snapshot.ParseHash(e)
-		if err != nil {
-			return 1, fmt.Errorf("failure parsing exclude hash %q: %v", e, err)
-		}
-		if h != nil {
-			exclude = append(exclude, h)
-		}
+	exclude, err := hashesFromFileAndFlag(ctx, *exportExcludeFromFileFlag, *exportExcludeFlag)
+	if err != nil {
+		return 1, err
 	}
-
-	metadata := make(map[string]io.Reader)
-	for _, pair := range strings.Split(*exportMetadataFlag, ",") {
-		if len(pair) == 0 {
-			continue
-		}
-		parts := strings.Split(pair, "=")
-		if len(parts) != 2 {
-			return 1, fmt.Errorf("malformed key=value pair %q", pair)
-		}
-		metadata[parts[0]] = strings.NewReader(parts[1])
+	metadata, err := metadataFromFilesAndFlag(ctx, *exportMetadataFromFilesFlag, *exportMetadataFlag)
+	if err != nil {
+		return 1, err
 	}
 
 	path, err := filepath.Abs(args[0])
@@ -118,8 +181,14 @@ func exportCommand(ctx context.Context, s *storage.LocalFiles, cmd string, args 
 	if err != nil {
 		return 1, fmt.Errorf("failure opening the file %q: %v", path, err)
 	}
-	if err := bundle.Export(ctx, s, out, snapshots, exclude, metadata, *exportIncludeParentsFlag); err != nil {
+	included, err := bundle.Export(ctx, s, out, snapshots, exclude, metadata, *exportIncludeParentsFlag)
+	if err != nil {
 		return 1, fmt.Errorf("failure creating the bundle: %v\n", err)
+	}
+	if *exportVerboseFlag {
+		for _, h := range included {
+			fmt.Println(h.String())
+		}
 	}
 	return 0, nil
 }

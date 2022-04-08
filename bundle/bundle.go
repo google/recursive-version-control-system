@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"sync"
 
 	"github.com/google/recursive-version-control-system/snapshot"
 	"github.com/google/recursive-version-control-system/storage"
@@ -41,9 +42,12 @@ type ZipWriter struct {
 	visited        map[snapshot.Hash]struct{}
 	exclude        map[snapshot.Hash]struct{}
 	recurseParents bool
+
+	mu       sync.Mutex
+	included []*snapshot.Hash
 }
 
-func NewZipWriter(w io.Writer, exclude []*snapshot.Hash, metadata map[string]io.Reader, recurseParents bool) (*ZipWriter, error) {
+func NewZipWriter(w io.Writer, exclude []*snapshot.Hash, metadata map[string]io.ReadCloser, recurseParents bool) (*ZipWriter, error) {
 	excludeMap := make(map[snapshot.Hash]struct{})
 	for _, h := range exclude {
 		excludeMap[*h] = struct{}{}
@@ -56,6 +60,9 @@ func NewZipWriter(w io.Writer, exclude []*snapshot.Hash, metadata map[string]io.
 		}
 		if _, err := io.Copy(fw, r); err != nil {
 			return nil, fmt.Errorf("failure writing the zip file entry for metadata key %q: %v", name, err)
+		}
+		if err := r.Close(); err != nil {
+			return nil, fmt.Errorf("failure closing the metadata reader: %v", err)
 		}
 	}
 	return &ZipWriter{
@@ -79,6 +86,8 @@ func (w *ZipWriter) AddObject(ctx context.Context, s *storage.LocalFiles, h *sna
 		// We already added this to the zip writer.
 		return nil
 	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	w.visited[*h] = struct{}{}
 	r, err := s.ReadObject(ctx, h)
 	if err != nil {
@@ -92,6 +101,7 @@ func (w *ZipWriter) AddObject(ctx context.Context, s *storage.LocalFiles, h *sna
 	if _, err := io.Copy(fw, r); err != nil {
 		return fmt.Errorf("failure writing the zip file entry for %q: %v", h, err)
 	}
+	w.included = append(w.included, h)
 	return nil
 }
 
@@ -156,10 +166,10 @@ func (w *ZipWriter) AddFile(ctx context.Context, s *storage.LocalFiles, h *snaps
 //
 // The `metadata` argument specifies an additional map of key/value pairs
 // to include in the bundle in a separate subpath from the bundled objects.
-func Export(ctx context.Context, s *storage.LocalFiles, w io.Writer, snapshots []*snapshot.Hash, exclude []*snapshot.Hash, metadata map[string]io.Reader, recurseParents bool) (err error) {
+func Export(ctx context.Context, s *storage.LocalFiles, w io.Writer, snapshots []*snapshot.Hash, exclude []*snapshot.Hash, metadata map[string]io.ReadCloser, recurseParents bool) (included []*snapshot.Hash, err error) {
 	zw, err := NewZipWriter(w, exclude, metadata, recurseParents)
 	if err != nil {
-		return fmt.Errorf("failure creating the zip writer for the bundle: %v", err)
+		return nil, fmt.Errorf("failure creating the zip writer for the bundle: %v", err)
 	}
 	defer func() {
 		ce := zw.Close()
@@ -171,11 +181,11 @@ func Export(ctx context.Context, s *storage.LocalFiles, w io.Writer, snapshots [
 	for _, h := range snapshots {
 		f, err := s.ReadSnapshot(ctx, h)
 		if err != nil {
-			return fmt.Errorf("failure reading the snapshot %q: %v", h, err)
+			return nil, fmt.Errorf("failure reading the snapshot %q: %v", h, err)
 		}
 		if err := zw.AddFile(ctx, s, h, f); err != nil {
-			return fmt.Errorf("failure adding %q to the zip file: %v", h, err)
+			return nil, fmt.Errorf("failure adding %q to the zip file: %v", h, err)
 		}
 	}
-	return nil
+	return zw.included, nil
 }
