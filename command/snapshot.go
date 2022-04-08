@@ -93,6 +93,6 @@ func snapshotCommand(ctx context.Context, s *storage.LocalFiles, cmd string, arg
 		}
 	}
 
-	fmt.Printf("Snapshotted %q to %q\n", path, h)
+	fmt.Printf("%s  %s\n", h, path)
 	return 0, nil
 }
