@@ -43,7 +43,7 @@ var (
 		"comma separated list of snapshots to include in the exported bundle")
 	exportSnapshotsFromFileFlag = exportFlags.String(
 		"snapshots-from-file", "",
-		"path to a file containing a comma separated list of snapshots to include in the exported bundle")
+		"path to a file containing a newline separated list of snapshots to include in the exported bundle")
 
 	exportExcludeFlag = exportFlags.String(
 		"exclude", "",
@@ -52,7 +52,7 @@ var (
 			"in both flags will not be included in the bundle."))
 	exportExcludeFromFileFlag = exportFlags.String(
 		"exclude-from-file", "",
-		"path to a file containing a comma separated list of objects to exclude in the exported bundle")
+		"path to a file containing a newline separated list of objects to exclude in the exported bundle")
 
 	exportMetadataFlag = exportFlags.String(
 		"metadata", "",
