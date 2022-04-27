@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/google/recursive-version-control-system/config"
+	"github.com/google/recursive-version-control-system/publish"
 	"github.com/google/recursive-version-control-system/snapshot"
 	"github.com/google/recursive-version-control-system/storage"
 )
@@ -32,6 +34,7 @@ var (
 		"export":   exportCommand,
 		"log":      logCommand,
 		"merge":    mergeCommand,
+		"publish":  publishCommand,
 		"snapshot": snapshotCommand,
 	}
 
@@ -42,14 +45,31 @@ Where <SUBCOMMAND> is one of:
 	export
 	log
 	merge
+	publish
 	snapshot
 `
 )
+
+func resolveIdentitySnapshot(ctx context.Context, s *storage.LocalFiles, id *snapshot.Identity) (*snapshot.Hash, error) {
+	settings, err := config.Read()
+	if err != nil {
+		return nil, fmt.Errorf("failure reading the config settings: %v", err)
+	}
+	h, err := publish.Pull(ctx, settings, s, id)
+	if err != nil {
+		return nil, fmt.Errorf("failure pulling the latest snapshot for %q: %v", id, err)
+	}
+	return h, nil
+}
 
 func resolveSnapshot(ctx context.Context, s *storage.LocalFiles, name string) (*snapshot.Hash, error) {
 	h, err := snapshot.ParseHash(name)
 	if err == nil {
 		return h, nil
+	}
+	id, err := snapshot.ParseIdentity(name)
+	if err == nil {
+		return resolveIdentitySnapshot(ctx, s, id)
 	}
 	abs, err := filepath.Abs(name)
 	if err != nil {
