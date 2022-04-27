@@ -321,3 +321,50 @@ func (s *LocalFiles) PathInfoMatchesCache(ctx context.Context, p snapshot.Path, 
 	})
 	return cachedInfoStr == newInfo
 }
+
+func (s *LocalFiles) idFile(id *snapshot.Identity) (dir string, name string, err error) {
+	idHash, err := snapshot.NewHash(strings.NewReader(id.String()))
+	if err != nil {
+		return "", "", fmt.Errorf("failure hashing the identity %q: %v", id, err)
+	}
+	dir, name = objectName(idHash, filepath.Join(s.ArchiveDir, "identities"))
+	return dir, name, nil
+}
+
+func (s *LocalFiles) LatestSnapshotForIdentity(ctx context.Context, id *snapshot.Identity) (*snapshot.Hash, error) {
+	idDir, idFile, err := s.idFile(id)
+	if err != nil {
+		return nil, fmt.Errorf("failure constructing the id dir path for %q: %v", id, err)
+	}
+	idPath := filepath.Join(idDir, idFile)
+	bs, err := os.ReadFile(idPath)
+	if os.IsNotExist(err) {
+		// The given identity is not known
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failure reading the identity file for %q: %v", id, err)
+	}
+	h, err := snapshot.ParseHash(string(bs))
+	if err != nil {
+		return nil, fmt.Errorf("failure parsing the hash for identity %q: %v", id, err)
+	}
+	return h, nil
+}
+
+func (s *LocalFiles) UpdateSnapshotForIdentity(ctx context.Context, id *snapshot.Identity, h *snapshot.Hash) error {
+	idDir, idFile, err := s.idFile(id)
+	if err != nil {
+		return fmt.Errorf("failure constructing the id dir path for %q: %v", id, err)
+	}
+	idPath := filepath.Join(idDir, idFile)
+	if h == nil {
+		if err := os.Remove(idPath); !os.IsNotExist(err) {
+			return fmt.Errorf("failure removing the identity entry for %q: %v", id, err)
+		}
+	}
+	if err := os.MkdirAll(idDir, 0700); err != nil {
+		return fmt.Errorf("failure creating the id dir for %q: %v", id, err)
+	}
+	return os.WriteFile(idPath, []byte(h.String()), 0700)
+}
