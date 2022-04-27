@@ -47,7 +47,7 @@ Publish the most recent snapshot of a file by signing it:
 **TODO: This is planned but not yet implemented!**
 
 ```shell
-rvcs publish <IDENTITY> <PATH>
+rvcs publish <PATH> <IDENTITY>
 ```
 
 Merge in changes from the most recent snapshot signed by someone:
@@ -79,7 +79,7 @@ When the snapshot is for a directory, the contents are a plain text file
 listing the names of each file contained in that directory, and that file's
 corresponding snapshot.
 
-## Signing Snapshots
+## Publishing Snapshots
 
 **TODO: This is planned but not yet implemented!**
 
