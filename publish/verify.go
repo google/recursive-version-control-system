@@ -31,7 +31,8 @@ func Verify(ctx context.Context, s *storage.LocalFiles, id *snapshot.Identity, s
 		return nil, errors.New("identity must not be nil")
 	}
 	if signatureHash == nil {
-		return nil, errors.New("cannot verify a nil signature hash")
+		// This is always the case for a new identity
+		return nil, nil
 	}
 	helperCommand := fmt.Sprintf("rvcs-verify-%s", id.Algorithm())
 	args := []string{id.Contents(), signatureHash.String()}

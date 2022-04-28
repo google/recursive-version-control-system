@@ -60,6 +60,10 @@ func pullFromAndVerify(ctx context.Context, m *config.Mirror, s *storage.LocalFi
 	if err != nil {
 		return nil, nil, fmt.Errorf("failure pulling the latest snapshot for %q from %q: %v", id, m, err)
 	}
+	if signature == nil {
+		// This identity is not known on that mirror
+		return nil, nil, nil
+	}
 	if signature.Equal(prevSignature) {
 		return prevSignature, prevSigned, nil
 	}
@@ -94,6 +98,9 @@ func Pull(ctx context.Context, settings *config.Settings, s *storage.LocalFiles,
 		if err != nil {
 			return nil, nil, fmt.Errorf("failure pulling the latest snapshot for %q from %q: %v", id, mirror, err)
 		}
+	}
+	if signature == nil {
+		return nil, nil, nil
 	}
 	if err := s.UpdateSignatureForIdentity(ctx, id, signature); err != nil {
 		return nil, nil, fmt.Errorf("failure updating the latest snapshot for %q to %q: %v", id, signature, err)
