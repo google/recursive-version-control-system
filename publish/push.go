@@ -52,22 +52,27 @@ func pushTo(ctx context.Context, m *config.Mirror, s *storage.LocalFiles, id *sn
 	return h, nil
 }
 
-func Push(ctx context.Context, settings *config.Settings, s *storage.LocalFiles, id *snapshot.Identity, h *snapshot.Hash) (*snapshot.Hash, error) {
+func Push(ctx context.Context, settings *config.Settings, s *storage.LocalFiles, id *snapshot.Identity, signature *snapshot.Hash) (*snapshot.Hash, error) {
+	pushed := signature
 	for _, idSetting := range settings.Identities {
 		if idSetting.Name == id.String() {
 			for _, mirror := range idSetting.PushMirrors {
-				h2, err := pushTo(ctx, mirror, s, id, h)
+				pushed, err := pushTo(ctx, mirror, s, id, pushed)
+				if !pushed.Equal(signature) {
+					if _, err := Verify(ctx, s, id, signature); err != nil {
+						return nil, fmt.Errorf("failure verifying the upstream signature for %q at %q: %v", id, mirror, err)
+					}
+				}
 				if err != nil {
 					return nil, fmt.Errorf("failure pushing the latest snapshot for %q to %q: %v", id, mirror, err)
-				}
-				if !h2.Equal(h) {
-					h = h2
 				}
 			}
 		}
 	}
-	if err := s.UpdateSnapshotForIdentity(ctx, id, h); err != nil {
-		return nil, fmt.Errorf("failure updating the latest snapshot for %q to %q: %v", id, h, err)
+	if !pushed.Equal(signature) {
+		if err := s.UpdateSignatureForIdentity(ctx, id, pushed); err != nil {
+			return nil, fmt.Errorf("failure updating the latest snapshot for %q to %q: %v", id, pushed, err)
+		}
 	}
-	return h, nil
+	return pushed, nil
 }

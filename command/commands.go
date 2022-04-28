@@ -50,16 +50,16 @@ Where <SUBCOMMAND> is one of:
 `
 )
 
-func resolveIdentitySnapshot(ctx context.Context, s *storage.LocalFiles, id *snapshot.Identity) (*snapshot.Hash, error) {
+func resolveIdentitySnapshot(ctx context.Context, s *storage.LocalFiles, id *snapshot.Identity) (signature *snapshot.Hash, signed *snapshot.Hash, err error) {
 	settings, err := config.Read()
 	if err != nil {
-		return nil, fmt.Errorf("failure reading the config settings: %v", err)
+		return nil, nil, fmt.Errorf("failure reading the config settings: %v", err)
 	}
-	h, err := publish.Pull(ctx, settings, s, id)
+	signature, signed, err = publish.Pull(ctx, settings, s, id)
 	if err != nil {
-		return nil, fmt.Errorf("failure pulling the latest snapshot for %q: %v", id, err)
+		return nil, nil, fmt.Errorf("failure pulling the latest snapshot for %q: %v", id, err)
 	}
-	return h, nil
+	return signature, signed, nil
 }
 
 func resolveSnapshot(ctx context.Context, s *storage.LocalFiles, name string) (*snapshot.Hash, error) {
@@ -69,7 +69,8 @@ func resolveSnapshot(ctx context.Context, s *storage.LocalFiles, name string) (*
 	}
 	id, err := snapshot.ParseIdentity(name)
 	if err == nil {
-		return resolveIdentitySnapshot(ctx, s, id)
+		_, signed, err := resolveIdentitySnapshot(ctx, s, id)
+		return signed, err
 	}
 	abs, err := filepath.Abs(name)
 	if err != nil {

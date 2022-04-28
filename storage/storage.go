@@ -331,7 +331,7 @@ func (s *LocalFiles) idFile(id *snapshot.Identity) (dir string, name string, err
 	return dir, name, nil
 }
 
-func (s *LocalFiles) LatestSnapshotForIdentity(ctx context.Context, id *snapshot.Identity) (*snapshot.Hash, error) {
+func (s *LocalFiles) LatestSignatureForIdentity(ctx context.Context, id *snapshot.Identity) (*snapshot.Hash, error) {
 	idDir, idFile, err := s.idFile(id)
 	if err != nil {
 		return nil, fmt.Errorf("failure constructing the id dir path for %q: %v", id, err)
@@ -352,7 +352,7 @@ func (s *LocalFiles) LatestSnapshotForIdentity(ctx context.Context, id *snapshot
 	return h, nil
 }
 
-func (s *LocalFiles) UpdateSnapshotForIdentity(ctx context.Context, id *snapshot.Identity, h *snapshot.Hash) error {
+func (s *LocalFiles) UpdateSignatureForIdentity(ctx context.Context, id *snapshot.Identity, h *snapshot.Hash) error {
 	idDir, idFile, err := s.idFile(id)
 	if err != nil {
 		return fmt.Errorf("failure constructing the id dir path for %q: %v", id, err)

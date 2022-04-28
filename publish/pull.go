@@ -55,29 +55,48 @@ func pullFrom(ctx context.Context, m *config.Mirror, s *storage.LocalFiles, id *
 	return h, nil
 }
 
-func Pull(ctx context.Context, settings *config.Settings, s *storage.LocalFiles, id *snapshot.Identity) (*snapshot.Hash, error) {
-	h, err := s.LatestSnapshotForIdentity(ctx, id)
+func pullFromAndVerify(ctx context.Context, m *config.Mirror, s *storage.LocalFiles, id *snapshot.Identity, prevSignature *snapshot.Hash, prevSigned *snapshot.Hash) (signature *snapshot.Hash, signed *snapshot.Hash, err error) {
+	signature, err = pullFrom(ctx, m, s, id, prevSignature)
 	if err != nil {
-		return nil, fmt.Errorf("failure looking up the previous snapshot for %q: %v", id, err)
+		return nil, nil, fmt.Errorf("failure pulling the latest snapshot for %q from %q: %v", id, m, err)
+	}
+	if signature.Equal(prevSignature) {
+		return prevSignature, prevSigned, nil
+	}
+	signed, err = Verify(ctx, s, id, signature)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failure verifying the signature for %q from %q: %v", id, m, err)
+	}
+	return signature, signed, nil
+}
+
+func Pull(ctx context.Context, settings *config.Settings, s *storage.LocalFiles, id *snapshot.Identity) (signature *snapshot.Hash, signed *snapshot.Hash, err error) {
+	signature, err = s.LatestSignatureForIdentity(ctx, id)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failure looking up the previous signature for %q: %v", id, err)
+	}
+	signed, err = Verify(ctx, s, id, signature)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failure verifying the previous signature for %q: %v", id, err)
 	}
 	for _, idSetting := range settings.Identities {
 		if idSetting.Name == id.String() {
 			for _, mirror := range idSetting.PullMirrors {
-				h, err = pullFrom(ctx, mirror, s, id, h)
+				signature, signed, err = pullFromAndVerify(ctx, mirror, s, id, signature, signed)
 				if err != nil {
-					return nil, fmt.Errorf("failure pulling the latest snapshot for %q from %q: %v", id, mirror, err)
+					return nil, nil, fmt.Errorf("failure pulling the latest snapshot for %q from %q: %v", id, mirror, err)
 				}
 			}
 		}
 	}
 	for _, mirror := range settings.AdditionalPullMirrors {
-		h, err = pullFrom(ctx, mirror, s, id, h)
+		signature, signed, err = pullFromAndVerify(ctx, mirror, s, id, signature, signed)
 		if err != nil {
-			return nil, fmt.Errorf("failure pulling the latest snapshot for %q from %q: %v", id, mirror, err)
+			return nil, nil, fmt.Errorf("failure pulling the latest snapshot for %q from %q: %v", id, mirror, err)
 		}
 	}
-	if err := s.UpdateSnapshotForIdentity(ctx, id, h); err != nil {
-		return nil, fmt.Errorf("failure updating the latest snapshot for %q to %q: %v", id, h, err)
+	if err := s.UpdateSignatureForIdentity(ctx, id, signature); err != nil {
+		return nil, nil, fmt.Errorf("failure updating the latest snapshot for %q to %q: %v", id, signature, err)
 	}
-	return h, nil
+	return signature, signed, nil
 }

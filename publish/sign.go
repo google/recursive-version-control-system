@@ -26,7 +26,7 @@ import (
 	"github.com/google/recursive-version-control-system/storage"
 )
 
-func Sign(ctx context.Context, s *storage.LocalFiles, id *snapshot.Identity, h *snapshot.Hash, prev *snapshot.Hash) (*snapshot.Hash, error) {
+func Sign(ctx context.Context, s *storage.LocalFiles, id *snapshot.Identity, h *snapshot.Hash, prevSignature *snapshot.Hash) (*snapshot.Hash, error) {
 	if id == nil {
 		return nil, errors.New("identity must not be nil")
 	}
@@ -35,8 +35,8 @@ func Sign(ctx context.Context, s *storage.LocalFiles, id *snapshot.Identity, h *
 	}
 	helperCommand := fmt.Sprintf("rvcs-sign-%s", id.Algorithm())
 	args := []string{id.Contents(), h.String()}
-	if prev != nil {
-		args = append(args, prev.String())
+	if prevSignature != nil {
+		args = append(args, prevSignature.String())
 	}
 	signCmd := exec.Command(helperCommand, args...)
 	stdout, err := signCmd.StdoutPipe()
@@ -54,7 +54,7 @@ func Sign(ctx context.Context, s *storage.LocalFiles, id *snapshot.Identity, h *
 	if err != nil {
 		return nil, fmt.Errorf("failure parsing the stdout of the sign helper %q: %v", helperCommand, err)
 	}
-	if err := s.UpdateSnapshotForIdentity(ctx, id, h); err != nil {
+	if err := s.UpdateSignatureForIdentity(ctx, id, h); err != nil {
 		return nil, fmt.Errorf("failure updating the latest snapshot for %q to %q: %v", id, h, err)
 	}
 	return h, nil
