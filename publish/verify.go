@@ -19,8 +19,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
-	"os/exec"
 
 	"github.com/google/recursive-version-control-system/snapshot"
 	"github.com/google/recursive-version-control-system/storage"
@@ -31,26 +29,14 @@ func Verify(ctx context.Context, s *storage.LocalFiles, id *snapshot.Identity, s
 		return nil, errors.New("identity must not be nil")
 	}
 	if signatureHash == nil {
-		// This is always the case for a new identity
+		// This is always the case for a new identity, so we treat
+		// the nil hash as a special case that can alwasy be verified.
 		return nil, nil
 	}
-	helperCommand := fmt.Sprintf("rvcs-verify-%s", id.Algorithm())
 	args := []string{id.Contents(), signatureHash.String()}
-	verifyCmd := exec.Command(helperCommand, args...)
-	stdout, err := verifyCmd.StdoutPipe()
+	h, err := runHelper(ctx, "verify", id.Algorithm(), args)
 	if err != nil {
-		return nil, fmt.Errorf("failure constructing the verify command for %q: %v", helperCommand, err)
-	}
-	if err := verifyCmd.Start(); err != nil {
-		return nil, fmt.Errorf("failure verifying the signature %q: %v", signatureHash, err)
-	}
-	outBytes, err := io.ReadAll(stdout)
-	if err != nil {
-		return nil, fmt.Errorf("failure reading the stdout of the verify helper %q: %v", helperCommand, err)
-	}
-	h, err := snapshot.ParseHash(string(outBytes))
-	if err != nil {
-		return nil, fmt.Errorf("failure parsing the stdout of the verify helper %q: %v", helperCommand, err)
+		return nil, fmt.Errorf("failure invoking the verify helper for %q: %v", id.Algorithm(), err)
 	}
 	return h, nil
 }

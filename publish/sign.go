@@ -19,8 +19,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
-	"os/exec"
 
 	"github.com/google/recursive-version-control-system/snapshot"
 	"github.com/google/recursive-version-control-system/storage"
@@ -31,28 +29,16 @@ func Sign(ctx context.Context, s *storage.LocalFiles, id *snapshot.Identity, h *
 		return nil, errors.New("identity must not be nil")
 	}
 	if h == nil {
-		return nil, errors.New("cannot sign a nil hash")
+		// Signing a nil hash is a no-op
+		return nil, nil
 	}
-	helperCommand := fmt.Sprintf("rvcs-sign-%s", id.Algorithm())
 	args := []string{id.Contents(), h.String()}
 	if prevSignature != nil {
 		args = append(args, prevSignature.String())
 	}
-	signCmd := exec.Command(helperCommand, args...)
-	stdout, err := signCmd.StdoutPipe()
+	h, err := runHelper(ctx, "sign", id.Algorithm(), args)
 	if err != nil {
-		return nil, fmt.Errorf("failure constructing the sign command for %q: %v", helperCommand, err)
-	}
-	if err := signCmd.Start(); err != nil {
-		return nil, fmt.Errorf("failure running the sign helper %q: %v", helperCommand, err)
-	}
-	outBytes, err := io.ReadAll(stdout)
-	if err != nil {
-		return nil, fmt.Errorf("failure reading the stdout of the sign helper %q: %v", helperCommand, err)
-	}
-	h, err = snapshot.ParseHash(string(outBytes))
-	if err != nil {
-		return nil, fmt.Errorf("failure parsing the stdout of the sign helper %q: %v", helperCommand, err)
+		return nil, fmt.Errorf("failure invoking the sign helper for %q: %v", id.Algorithm(), err)
 	}
 	if err := s.UpdateSignatureForIdentity(ctx, id, h); err != nil {
 		return nil, fmt.Errorf("failure updating the latest snapshot for %q to %q: %v", id, h, err)

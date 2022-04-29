@@ -18,8 +18,6 @@ package publish
 import (
 	"context"
 	"fmt"
-	"io"
-	"os/exec"
 
 	"github.com/google/recursive-version-control-system/config"
 	"github.com/google/recursive-version-control-system/snapshot"
@@ -30,27 +28,14 @@ func pullFrom(ctx context.Context, m *config.Mirror, s *storage.LocalFiles, id *
 	if m == nil || m.URL == nil {
 		return prev, nil
 	}
-	helperCommand := fmt.Sprintf("rvcs-pull-%s", m.URL.Scheme)
 	args := m.HelperFlags
 	args = append(args, id.String())
 	if prev != nil {
 		args = append(args, prev.String())
 	}
-	pullCmd := exec.Command(helperCommand, args...)
-	stdout, err := pullCmd.StdoutPipe()
+	h, err := runHelper(ctx, "pull", m.URL.Scheme, args)
 	if err != nil {
-		return nil, fmt.Errorf("failure constructing the pull command for %q: %v", helperCommand, err)
-	}
-	if err := pullCmd.Start(); err != nil {
-		return nil, fmt.Errorf("failure running the pull helper %q: %v", helperCommand, err)
-	}
-	outBytes, err := io.ReadAll(stdout)
-	if err != nil {
-		return nil, fmt.Errorf("failure reading the stdout of the pull helper %q: %v", helperCommand, err)
-	}
-	h, err := snapshot.ParseHash(string(outBytes))
-	if err != nil {
-		return nil, fmt.Errorf("failure parsing the stdout of the pull helper %q: %v", helperCommand, err)
+		return nil, fmt.Errorf("failure invoking the pull helper for %q: %v", m.URL.Scheme, err)
 	}
 	return h, nil
 }
