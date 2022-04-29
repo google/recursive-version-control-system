@@ -43,7 +43,7 @@ func pullFrom(ctx context.Context, m *config.Mirror, s *storage.LocalFiles, id *
 func pullFromAndVerify(ctx context.Context, m *config.Mirror, s *storage.LocalFiles, id *snapshot.Identity, prevSignature *snapshot.Hash, prevSigned *snapshot.Hash) (signature *snapshot.Hash, signed *snapshot.Hash, err error) {
 	signature, err = pullFrom(ctx, m, s, id, prevSignature)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failure pulling the latest snapshot for %q from %q: %v", id, m, err)
+		return nil, nil, fmt.Errorf("failure pulling the latest snapshot for %q from %q: %v", id, m.URL, err)
 	}
 	if signature == nil {
 		// This identity is not known on that mirror
@@ -54,7 +54,7 @@ func pullFromAndVerify(ctx context.Context, m *config.Mirror, s *storage.LocalFi
 	}
 	signed, err = Verify(ctx, s, id, signature)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failure verifying the signature for %q from %q: %v", id, m, err)
+		return nil, nil, fmt.Errorf("failure verifying the signature for %q from %q: %v", id, m.URL, err)
 	}
 	return signature, signed, nil
 }

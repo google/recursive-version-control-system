@@ -49,7 +49,7 @@ func Push(ctx context.Context, settings *config.Settings, s *storage.LocalFiles,
 					}
 				}
 				if err != nil {
-					return nil, fmt.Errorf("failure pushing the latest snapshot for %q to %q: %v", id, mirror, err)
+					return nil, fmt.Errorf("failure pushing the latest snapshot for %q to %q: %v", id, mirror.URL, err)
 				}
 			}
 		}
