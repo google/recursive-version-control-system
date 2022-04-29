@@ -25,7 +25,6 @@ import (
 	"strings"
 
 	"github.com/google/recursive-version-control-system/bundle"
-	"github.com/google/recursive-version-control-system/snapshot"
 	"github.com/google/recursive-version-control-system/storage"
 )
 
@@ -68,52 +67,6 @@ var (
 		"v", false,
 		"verbose output. Print the hash of every object included in the exported bundle")
 )
-
-func readHashesFromFile(ctx context.Context, path string) ([]*snapshot.Hash, error) {
-	if path == "" {
-		return nil, nil
-	}
-	contents, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("failure reading hashes from the file %q: %v", path, err)
-	}
-	var hashes []*snapshot.Hash
-	for _, line := range strings.Split(string(contents), "\n") {
-		line = strings.TrimSpace(line)
-		if len(line) == 0 {
-			continue
-		}
-		h, err := snapshot.ParseHash(line)
-		if err != nil {
-			return nil, fmt.Errorf("failure parsing file hash entry %q: %v", line, err)
-		}
-		if h != nil {
-			hashes = append(hashes, h)
-		}
-	}
-	return hashes, nil
-}
-
-func hashesFromFileAndFlag(ctx context.Context, fromFile, fromFlag string) ([]*snapshot.Hash, error) {
-	hashes, err := readHashesFromFile(ctx, fromFile)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, s := range strings.Split(fromFlag, ",") {
-		if len(s) == 0 {
-			continue
-		}
-		h, err := snapshot.ParseHash(s)
-		if err != nil {
-			return nil, fmt.Errorf("failure parsing flag hash entry %q: %v", s, err)
-		}
-		if h != nil {
-			hashes = append(hashes, h)
-		}
-	}
-	return hashes, nil
-}
 
 func metadataFromFilesAndFlag(ctx context.Context, fromFiles, fromFlag string) (map[string]io.ReadCloser, error) {
 	metadata := make(map[string]io.ReadCloser)

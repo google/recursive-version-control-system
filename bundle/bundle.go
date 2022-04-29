@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"strings"
 	"sync"
 
 	"github.com/google/recursive-version-control-system/snapshot"
@@ -35,6 +36,20 @@ func bundleEntryPath(h *snapshot.Hash) string {
 		return path.Join("objects", h.Function(), h.HexContents()[0:2], h.HexContents()[2:])
 	}
 	return path.Join("objects", h.Function(), h.HexContents())
+}
+
+func bundlePathHash(path string) (*snapshot.Hash, error) {
+	if !strings.HasPrefix(path, "objects") {
+		return nil, fmt.Errorf("Path %q is not an object path", path)
+	}
+	p := strings.TrimPrefix(path, "objects")
+	parts := strings.Split(p, "/")
+	if len(parts) < 2 {
+		return nil, fmt.Errorf("Path %q does not correspond to a valid hash", path)
+	}
+	f := parts[0]
+	c := strings.Join(parts[1:], "")
+	return snapshot.ParseHash(fmt.Sprintf("%s:%s", f, c))
 }
 
 type ZipWriter struct {
@@ -188,4 +203,59 @@ func Export(ctx context.Context, s *storage.LocalFiles, w io.Writer, snapshots [
 		}
 	}
 	return zw.included, nil
+}
+
+func validateZipEntry(ctx context.Context, f *zip.File) error {
+	h, err := bundlePathHash(f.Name)
+	if err != nil {
+		// We allow additional/non-object files in bundles
+		return nil
+	}
+	r, err := f.Open()
+	if err != nil {
+		return fmt.Errorf("failure reading entry %q: %v", f.Name, err)
+	}
+	realHash, err := snapshot.NewHash(r)
+	if err != nil {
+		return fmt.Errorf("failure hashing the entry %q: %v", f.Name, err)
+	}
+	if !realHash.Equal(h) {
+		return fmt.Errorf("mismatched hash for entry %q: got %q, want %q", f.Name, realHash, h)
+	}
+	return nil
+}
+
+func Import(ctx context.Context, s *storage.LocalFiles, path string, exclude []*snapshot.Hash) (included []*snapshot.Hash, err error) {
+	r, err := zip.OpenReader(path)
+	if err != nil {
+		return nil, fmt.Errorf("failure opening the zip file %q: %v", path, err)
+	}
+	defer r.Close()
+	// We first validate that the bundle only includes valid object contents...
+	for _, f := range r.File {
+		if err := validateZipEntry(ctx, f); err != nil {
+			return nil, fmt.Errorf("failure validating the zip entry %q: %v", f.Name, err)
+		}
+	}
+	for _, f := range r.File {
+		h, err := bundlePathHash(f.Name)
+		if err != nil {
+			// We allow additional/non-object files in bundles
+			continue
+		}
+		if _, err := s.ReadObject(ctx, h); err == nil {
+			// We already have this object and can skip importing it.
+			continue
+		}
+		r, err := f.Open()
+		if err != nil {
+			return nil, fmt.Errorf("failure reading entry %q: %v", f.Name, err)
+		}
+		if h, err := s.StoreObject(ctx, r); err != nil {
+			return nil, fmt.Errorf("failure importing the zip entry %q: %v", f.Name, err)
+		} else {
+			included = append(included, h)
+		}
+	}
+	return included, nil
 }

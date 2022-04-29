@@ -19,7 +19,9 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/google/recursive-version-control-system/config"
 	"github.com/google/recursive-version-control-system/publish"
@@ -32,6 +34,7 @@ type command func(context.Context, *storage.LocalFiles, string, []string) (int, 
 var (
 	commandMap = map[string]command{
 		"export":   exportCommand,
+		"import":   importCommand,
 		"log":      logCommand,
 		"merge":    mergeCommand,
 		"publish":  publishCommand,
@@ -43,6 +46,7 @@ var (
 Where <SUBCOMMAND> is one of:
 
 	export
+	import
 	log
 	merge
 	publish
@@ -81,6 +85,52 @@ func resolveSnapshot(ctx context.Context, s *storage.LocalFiles, name string) (*
 		return h, nil
 	}
 	return nil, fmt.Errorf("unable to resolve the hash corresponding to %q", name)
+}
+
+func readHashesFromFile(ctx context.Context, path string) ([]*snapshot.Hash, error) {
+	if path == "" {
+		return nil, nil
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failure reading hashes from the file %q: %v", path, err)
+	}
+	var hashes []*snapshot.Hash
+	for _, line := range strings.Split(string(contents), "\n") {
+		line = strings.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+		h, err := snapshot.ParseHash(line)
+		if err != nil {
+			return nil, fmt.Errorf("failure parsing file hash entry %q: %v", line, err)
+		}
+		if h != nil {
+			hashes = append(hashes, h)
+		}
+	}
+	return hashes, nil
+}
+
+func hashesFromFileAndFlag(ctx context.Context, fromFile, fromFlag string) ([]*snapshot.Hash, error) {
+	hashes, err := readHashesFromFile(ctx, fromFile)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, s := range strings.Split(fromFlag, ",") {
+		if len(s) == 0 {
+			continue
+		}
+		h, err := snapshot.ParseHash(s)
+		if err != nil {
+			return nil, fmt.Errorf("failure parsing flag hash entry %q: %v", s, err)
+		}
+		if h != nil {
+			hashes = append(hashes, h)
+		}
+	}
+	return hashes, nil
 }
 
 // Run implements the subcommands of the `rvcs` CLI.
