@@ -29,7 +29,7 @@ func pushTo(ctx context.Context, m *config.Mirror, s *storage.LocalFiles, id *sn
 		return h, nil
 	}
 	args := m.HelperFlags
-	args = append(args, id.String(), h.String())
+	args = append(args, m.URL.String(), id.String(), h.String())
 	h, err := runHelper(ctx, "push", m.URL.Scheme, args)
 	if err != nil {
 		return nil, fmt.Errorf("failure invoking the push helper for %q: %v", m.URL.Scheme, err)
