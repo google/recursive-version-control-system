@@ -1,0 +1,55 @@
+#!/bin/bash -e
+
+# Copyright 2022 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Usage:
+#
+#    rvcs publish <SOURCE> ssh::<SSH_PUBLIC_KEY>
+#
+# ... where <SSH_PUBLIC_KEY> is the base64-encoded contents of one of
+# the "id_....pub" files under your "~/.ssh" directory.
+
+pubkey="${1}"
+hash="${2}"
+previousSignature="${3:-}"
+
+if [ -z "${pubkey}" ]; then
+  echo "No public key provided." >&2
+  echo "Usage:" >&2
+  echo "  rvcs-sign-ssh ssh::<PUBLIC_KEY> <HASHCODE_TO_SIGN> [<HASHCODE_OF_PREVIOUS_SIGNATURE>]" >&2
+  exit 1
+fi
+
+if [ -z "${hash}" ]; then
+  echo "No snapshot hashcode provided." >&2
+  echo "Usage:" >&2
+  echo "  rvcs-sign-ssh ssh::<PUBLIC_KEY> <HASHCODE_TO_SIGN> [<HASHCODE_OF_PREVIOUS_SIGNATURE>]" >&2
+  exit 1
+fi
+
+keyfile="$(grep "${pubkey}" ~/.ssh/*.pub | cut -d ":" -f 1)"
+if [ -z "${keyfile}" ]; then
+  echo "Could not find the public key file for ${pubkey} under ~/.ssh/" >&2
+  exit 1
+fi
+
+signingKey="${keyfile%.pub}"
+dir=$(mktemp -d)
+echo "${hash}" > "${dir}/signed.txt"
+echo "${previousSignature}" >> "${dir}/signed.txt"
+rvcs snapshot "${dir}/signed.txt" --additional-parents="${hash}" >/dev/null
+ssh-keygen -q -Y sign -f "${signingKey}" -n "github.com/google/recursive-version-control-system" "${dir}/signed.txt"
+rvcs snapshot "${dir}" "--additional-parents=${previousSignature}" | cut -d " " -f 1 | tr -d "[:space:]"
+rm -rf "${dir}"

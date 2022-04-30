@@ -1,0 +1,65 @@
+#!/bin/bash -e
+
+# Copyright 2022 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Usage:
+#
+#    rvcs merge ssh::<SSH_PUBLIC_KEY> <DESTINATION>
+#
+# ... where <SSH_PUBLIC_KEY> is the base64-encoded contents of one of
+# the "id_....pub" files under your "~/.ssh" directory.
+#
+# Alternatively, you can invoke this helper directly using
+#
+#    rvcs-verify-ssh ssh::<SSH_PUBLIC_KEY> <HASH_OF_SIGNATURE>
+#
+# If the signature can be verified, the tool will output the hash
+# of the snapshot that was signed by it.
+
+pubkey="${1}"
+hash="${2}"
+
+if [ -z "${pubkey}" ]; then
+  echo "No public key provided." >&2
+  echo "Usage:" >&2
+  echo "  rvcs-verify-ssh ssh::<PUBLIC_KEY> <HASHCODE_OF_SIGNATURE>" >&2
+  exit 1
+fi
+
+if [ -z "${hash}" ]; then
+  echo "No signature hashcode provided." >&2
+  echo "Usage:" >&2
+  echo "  rvcs-verify-ssh ssh::<PUBLIC_KEY> <HASHCODE_OF_SIGNATURE>" >&2
+  exit 1
+fi
+
+keyfile="$(grep "${pubkey}" ~/.ssh/*.pub | cut -d ":" -f 1)"
+if [ -z "${keyfile}" ]; then
+  echo "Could not find the public key file for ${pubkey} under ~/.ssh/" >&2
+  exit 1
+fi
+
+signerEmail="$(cat "${keyfile}" | cut -d " " -f 3)"
+if [ -z "${signerEmail}" ]; then
+  echo "Could not parse the public key file at '${keyfile}'" >&2
+  exit 1
+fi
+allowedSigner="${signerEmail} $(cat "${keyfile}" | cut -d " " -f 1) $(cat "${keyfile}" | cut -d " " -f 2)"
+
+dir=$(mktemp -d)
+rvcs merge "${hash}" "${dir}/signature" >&2
+ssh-keygen -Y verify -f <(echo "${allowedSigner}") -I "${signerEmail}" -n "github.com/google/recursive-version-control-system" -s "${dir}/signature/signed.txt.sig" < "${dir}/signature/signed.txt" >&2
+cat "${dir}/signature/signed.txt" | head -n 1 | tr -d "[:space:]"
+rm -rf "${dir}"
