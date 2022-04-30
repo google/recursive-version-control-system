@@ -52,18 +52,22 @@ func publishCommand(ctx context.Context, s *storage.LocalFiles, cmd string, args
 	if err != nil {
 		return 1, fmt.Errorf("failure parsing the identity %q: %v", args[1], err)
 	}
-	prevSignature, _, err := resolveIdentitySnapshot(ctx, s, id)
+	signature, signed, err := resolveIdentitySnapshot(ctx, s, id)
 	if err != nil {
 		return 1, fmt.Errorf("failure resolving the previous signature for %q: %v", id, err)
 	}
-	nextSignature, err := publish.Sign(ctx, s, id, h, prevSignature)
-	if err != nil {
-		return 1, fmt.Errorf("failure signing %q with %q: %v", h, id, err)
+	if !signed.Equal(h) {
+		// The hash has not already been signed for this identity, so
+		// we must do that now.
+		signature, err = publish.Sign(ctx, s, id, h, signature)
+		if err != nil {
+			return 1, fmt.Errorf("failure signing %q with %q: %v", h, id, err)
+		}
 	}
-	updatedSignature, err := publish.Push(ctx, settings, s, id, nextSignature)
+	signature, err = publish.Push(ctx, settings, s, id, signature)
 	if err != nil {
 		return 1, fmt.Errorf("failure pushing the latest signature for %q: %v", id, err)
 	}
-	fmt.Printf("%s  %s\n", updatedSignature, id)
+	fmt.Printf("%s  %s\n", signature, id)
 	return 0, nil
 }
