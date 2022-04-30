@@ -130,11 +130,7 @@ func exportCommand(ctx context.Context, s *storage.LocalFiles, cmd string, args 
 		return 1, fmt.Errorf("failure resolving the absolute path of %q: %v", args[0], err)
 	}
 
-	out, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0700)
-	if err != nil {
-		return 1, fmt.Errorf("failure opening the file %q: %v", path, err)
-	}
-	included, err := bundle.Export(ctx, s, out, snapshots, exclude, metadata, *exportIncludeParentsFlag)
+	included, err := bundle.Export(ctx, s, path, snapshots, exclude, metadata, *exportIncludeParentsFlag)
 	if err != nil {
 		return 1, fmt.Errorf("failure creating the bundle: %v\n", err)
 	}

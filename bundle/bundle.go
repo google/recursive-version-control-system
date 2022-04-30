@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"path"
 	"strings"
 	"sync"
@@ -39,10 +40,10 @@ func bundleEntryPath(h *snapshot.Hash) string {
 }
 
 func bundlePathHash(path string) (*snapshot.Hash, error) {
-	if !strings.HasPrefix(path, "objects") {
+	if !strings.HasPrefix(path, "objects/") {
 		return nil, fmt.Errorf("Path %q is not an object path", path)
 	}
-	p := strings.TrimPrefix(path, "objects")
+	p := strings.TrimPrefix(path, "objects/")
 	parts := strings.Split(p, "/")
 	if len(parts) < 2 {
 		return nil, fmt.Errorf("Path %q does not correspond to a valid hash", path)
@@ -120,10 +121,30 @@ func (w *ZipWriter) AddObject(ctx context.Context, s *storage.LocalFiles, h *sna
 	return nil
 }
 
-func (w *ZipWriter) AddFile(ctx context.Context, s *storage.LocalFiles, h *snapshot.Hash, f *snapshot.File) error {
+func (w *ZipWriter) AddFile(ctx context.Context, s *storage.LocalFiles, h *snapshot.Hash, f *snapshot.File) (err error) {
 	if err := w.AddObject(ctx, s, h); err != nil {
 		return fmt.Errorf("failure adding the snapshot %q to the bundle: %v", h, err)
 	}
+	defer func() {
+		if err != nil {
+			return
+		}
+		if !w.recurseParents {
+			return
+		}
+		for _, parentHash := range f.Parents {
+			parent, err := s.ReadSnapshot(ctx, parentHash)
+			if err != nil {
+				// The history is incomplete
+				continue
+			}
+			err = w.AddFile(ctx, s, parentHash, parent)
+			if err != nil {
+				err = fmt.Errorf("failure adding the parent %q to the bundle: %v", parentHash, err)
+				return
+			}
+		}
+	}()
 	if f.Contents == nil {
 		return nil
 	}
@@ -152,19 +173,6 @@ func (w *ZipWriter) AddFile(ctx context.Context, s *storage.LocalFiles, h *snaps
 			return fmt.Errorf("failure adding the child %q to the bundle: %v", childHash, err)
 		}
 	}
-	if !w.recurseParents {
-		return nil
-	}
-	for _, parentHash := range f.Parents {
-		parent, err := s.ReadSnapshot(ctx, parentHash)
-		if err != nil {
-			// The history is incomplete
-			continue
-		}
-		if err := w.AddFile(ctx, s, parentHash, parent); err != nil {
-			return fmt.Errorf("failure adding the parent %q to the bundle: %v", parentHash, err)
-		}
-	}
 	return nil
 }
 
@@ -181,7 +189,12 @@ func (w *ZipWriter) AddFile(ctx context.Context, s *storage.LocalFiles, h *snaps
 //
 // The `metadata` argument specifies an additional map of key/value pairs
 // to include in the bundle in a separate subpath from the bundled objects.
-func Export(ctx context.Context, s *storage.LocalFiles, w io.Writer, snapshots []*snapshot.Hash, exclude []*snapshot.Hash, metadata map[string]io.ReadCloser, recurseParents bool) (included []*snapshot.Hash, err error) {
+func Export(ctx context.Context, s *storage.LocalFiles, path string, snapshots []*snapshot.Hash, exclude []*snapshot.Hash, metadata map[string]io.ReadCloser, recurseParents bool) (included []*snapshot.Hash, err error) {
+	w, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0700)
+	if err != nil {
+		return nil, fmt.Errorf("failure opening the file %q: %v", path, err)
+	}
+	defer w.Close()
 	zw, err := NewZipWriter(w, exclude, metadata, recurseParents)
 	if err != nil {
 		return nil, fmt.Errorf("failure creating the zip writer for the bundle: %v", err)
