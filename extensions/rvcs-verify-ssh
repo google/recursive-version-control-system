@@ -59,7 +59,26 @@ fi
 allowedSigner="${signerEmail} $(cat "${keyfile}" | cut -d " " -f 1) $(cat "${keyfile}" | cut -d " " -f 2)"
 
 dir=$(mktemp -d)
+function fail() {
+  echo "${1}" >&2
+  rm -rf "${dir}"
+  exit 1
+}
+
+# Fetch the signature and verify that it includes all the required contents...
 rvcs merge "${hash}" "${dir}/signature" >&2
-ssh-keygen -Y verify -f <(echo "${allowedSigner}") -I "${signerEmail}" -n "github.com/google/recursive-version-control-system" -s "${dir}/signature/signed.txt.sig" < "${dir}/signature/signed.txt" >&2
+for PARENT in `rvcs log -depth 2 -s "${dir}/signature" | tail -n +2`; do
+  grep -q "${PARENT}" "${dir}/signature/signed.txt" || fail " ${PARENT} is not in the signature."
+done
+for FILE in `ls "${dir}/signature" | grep -v "signed.txt"`; do
+  fileHash="$(rvcs log -s -depth 1 "${dir}/signature/${FILE}" | tr -d "[:space:]")"
+  grep -q "${fileHash}" "${dir}/signature/signed.txt" || fail "${FILE} hash '${fileHash}' is not in the signature."
+done
+
+# Verify the signature matches the key...
+ssh-keygen -Y verify -f <(echo "${allowedSigner}") -I "${signerEmail}" -n "github.com/google/recursive-version-control-system" -s "${dir}/signature/signed.txt.sig" < "${dir}/signature/signed.txt" >&2 || fail "Failed to verify that the signature matches the key."
+
+# If we got this far then the signature is fully verified and we should
+# print the hash of the signed snapshot.
 cat "${dir}/signature/signed.txt" | head -n 1 | tr -d "[:space:]"
 rm -rf "${dir}"
