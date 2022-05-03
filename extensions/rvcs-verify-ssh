@@ -28,7 +28,7 @@
 # If the signature can be verified, the tool will output the hash
 # of the snapshot that was signed by it.
 
-pubkey="${1}"
+pubkey="${1#ssh::}"
 hash="${2}"
 
 if [ -z "${pubkey}" ]; then

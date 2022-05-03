@@ -21,7 +21,7 @@
 # ... where <SSH_PUBLIC_KEY> is the base64-encoded contents of one of
 # the "id_....pub" files under your "~/.ssh" directory.
 
-pubkey="${1}"
+pubkey="${1#ssh::}"
 hash="${2}"
 previousSignature="${3:-}"
 

@@ -32,7 +32,7 @@ func Sign(ctx context.Context, s *storage.LocalFiles, id *snapshot.Identity, h *
 		// Signing a nil hash is a no-op
 		return nil, nil
 	}
-	args := []string{id.Contents(), h.String()}
+	args := []string{id.String(), h.String()}
 	if prevSignature != nil {
 		args = append(args, prevSignature.String())
 	}

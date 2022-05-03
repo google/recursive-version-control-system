@@ -33,7 +33,7 @@ func Verify(ctx context.Context, s *storage.LocalFiles, id *snapshot.Identity, s
 		// the nil hash as a special case that can alwasy be verified.
 		return nil, nil
 	}
-	args := []string{id.Contents(), signatureHash.String()}
+	args := []string{id.String(), signatureHash.String()}
 	h, err := runHelper(ctx, "verify", id.Algorithm(), args)
 	if err != nil {
 		return nil, fmt.Errorf("failure invoking the verify helper for %q: %v", id.Algorithm(), err)

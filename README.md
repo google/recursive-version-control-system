@@ -110,16 +110,16 @@ So, for example, to publish a snapshot with the identity `example::user`,
 you must have two programs in your system path named `rvcs-sign-example` and
 `rvcs-verify-example`.
 
-The sign helper takes up to three arguments; the contents of the identity that
-follow the first pair of colons (e.g. for `example::user`, this would be
-`user`), the hash of the snapshot to sign, and if the hash of the previous
-signature created for that identity (if any).
+The sign helper takes up to three arguments; the full contents of the
+identity (e.g. `example::user` for the example above), the hash of the
+snapshot to sign, and if the hash of the previous signature created for that
+identity (if any).
 
 If it is successful, then it outputs the hash of the snapshot of the
 generated signature to standard out and exits with a status code of `0`.
 
 The verify helper does the reverse of that. It takes two arguments; the
-contents of the identity and the hash of the generated signature. It then
+identity and the hash of the generated signature. It then
 verifies that this signature is valid for the specified identity.
 
 If it is, then the verify helper outputs the hash of the signed snapshot
