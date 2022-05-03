@@ -32,7 +32,13 @@ your entire file system.
 
 This is *experimental* and very much a work-in-progress.
 
-The only functionality implemented so far is the `snapshot` command.
+The only functionality fully implemented so far is the `snapshot` command.
+
+The `publish` command is implemented but needs more testing. Additionally,
+you have to provide helper commands in order to use it.
+
+The `merge` command is only implemented to the point of being able to use
+it to check out a snapshot into a new location.
 
 ## Usage
 
@@ -44,15 +50,13 @@ rvcs snapshot <PATH>
 
 Publish the most recent snapshot of a file by signing it:
 
-**TODO: This is planned but not yet implemented!**
-
 ```shell
 rvcs publish <PATH> <IDENTITY>
 ```
 
 Merge in changes from the most recent snapshot signed by someone:
 
-**TODO: This is planned but not yet implemented!**
+**TODO: This is planned but not yet fully implemented!**
 
 ```shell
 rvcs merge <IDENTITY> <PATH>
@@ -81,8 +85,6 @@ corresponding snapshot.
 
 ## Publishing Snapshots
 
-**TODO: This is planned but not yet implemented!**
-
 You share snapshots with others by "publishing" them. This consists of signing
 the snapshot by generating a signature for it tied to some identity you
 control.
@@ -93,6 +95,38 @@ validating signatures.
 
 That, in turn, is the primary extension mechanism for rvcs, as signature
 types can be defined to hold any data you want.
+
+### Sign and Verify Helpers
+
+Identities are of the form `<namespace>::<contents>`. In order to be able
+to publish a snapshot with a given identity, you must have "sign" and "verify"
+helpers located somewhere in your local system path.
+
+These helpers will always be named of the form `rvcs-sign-<namespace>` and
+`rvcs-verify-<namespace>`, where `<namespace>` is the prefix of the identity
+that comes before the first pair of colons.
+
+So, for example, to publish a snapshot with the identity `example::user`,
+you must have two programs in your system path named `rvcs-sign-example` and
+`rvcs-verify-example`.
+
+The sign helper takes up to three arguments; the contents of the identity that
+follow the first pair of colons (e.g. for `example::user`, this would be
+`user`), the hash of the snapshot to sign, and if the hash of the previous
+signature created for that identity (if any).
+
+If it is successful, then it outputs the hash of the snapshot of the
+generated signature to standard out and exits with a status code of `0`.
+
+The verify helper does the reverse of that. It takes two arguments; the
+contents of the identity and the hash of the generated signature. It then
+verifies that this signature is valid for the specified identity.
+
+If it is, then the verify helper outputs the hash of the signed snapshot
+to standard out and exits with a status code of `0`.
+
+There are example sign and verify helpers in the `extensions` directory that
+demonstrate how to sign and verify signatures using SSH keys.
 
 ## Mirrors
 
@@ -109,3 +143,28 @@ automatically reads any updated values from the mirrors.
 
 The actual communication with each mirror is performed by an external tool
 chosen based on the URL of the mirror.
+
+### Push and Pull Helpers
+
+Similarly to the sign and verify helpers, the rvcs tool relies on push and
+pull helpers to push snapshots to and pull them from mirrors.
+
+The helper tools are named of the form `rvcs-push-<scheme>` and
+`rvcs-pull-<scheme>`, where `<scheme>` is the scheme portion of the mirror's
+URL.
+
+So, for example, if a mirror has the URL `file:///some/local/path`, then
+rvcs will try to invoke a tool named `rvcs-push-file` to push to that mirror
+and one named `rvcs-pull-file` to pull from it.
+
+The pull helper tool takes the full URL of the mirror (including the scheme)
+and the fully specified identity (including the namespace).
+
+When successfull it outputs the hash of the latest signature for that
+identity that it pulled from the mirror and exits with a status code of `0`.
+
+The push helper takes the full URL of the mirror, the fully specified
+identity, and the hash of the latest, updated signature for that identity.
+
+If it successfully pushes that update to the mirror then it outputs the
+hash of the signature that was pushed and exits with a status code of `0`.
