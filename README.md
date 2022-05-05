@@ -112,7 +112,7 @@ you must have two programs in your system path named `rvcs-sign-example` and
 
 The sign helper takes up to three arguments; the full contents of the
 identity (e.g. `example::user` for the example above), the hash of the
-snapshot to sign, and if the hash of the previous signature created for that
+snapshot to sign, and the hash of the previous signature created for that
 identity (if any).
 
 If it is successful, then it outputs the hash of the snapshot of the
