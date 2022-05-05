@@ -20,9 +20,9 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 
 	"github.com/google/recursive-version-control-system/snapshot"
+	exec "golang.org/x/sys/execabs"
 )
 
 // runHelper invokes the external helper tool for the given command/namespace.
