@@ -49,7 +49,7 @@ signingKey="${keyfile%.pub}"
 dir=$(mktemp -d)
 echo "${hash}" > "${dir}/signed.txt"
 echo "${previousSignature}" >> "${dir}/signed.txt"
-rvcs snapshot "${dir}/signed.txt" --additional-parents="${hash}" >/dev/null
+rvcs snapshot --additional-parents="${hash}" "${dir}/signed.txt" >/dev/null
 ssh-keygen -q -Y sign -f "${signingKey}" -n "github.com/google/recursive-version-control-system" "${dir}/signed.txt"
 rvcs snapshot "${dir}" "--additional-parents=${previousSignature}" | cut -d " " -f 1 | tr -d "[:space:]"
 rm -rf "${dir}"
