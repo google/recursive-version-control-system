@@ -41,6 +41,17 @@ of concept helpers provided in the `extensions` directory.
 The `merge` command is only implemented to the point of being able to use
 it to check out a snapshot into a new location.
 
+## Installation
+
+If you have the [Go tools installed](https://golang.org/doc/install), you can
+install the `rvcs` tool by running the following command:
+
+    go install github.com/google/recursive-version-control-system/rvcs@latest
+
+Then, make sure that `${GOPATH}/bin` is in your PATH.
+
+Optionally, you can also copy the files from the `extensions` directory into some directory in your PATH to use them for publishing snapshots.
+
 ## Usage
 
 Snapshot the current contents of a file:
