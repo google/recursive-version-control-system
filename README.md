@@ -35,7 +35,8 @@ This is *experimental* and very much a work-in-progress.
 The only functionality fully implemented so far is the `snapshot` command.
 
 The `publish` command is implemented but needs more testing. Additionally,
-you have to provide helper commands in order to use it.
+you have to provide helper commands in order to use it, but there are proof
+of concept helpers provided in the `extensions` directory.
 
 The `merge` command is only implemented to the point of being able to use
 it to check out a snapshot into a new location.
@@ -56,7 +57,7 @@ rvcs publish <PATH> <IDENTITY>
 
 Merge in changes from the most recent snapshot signed by someone:
 
-**TODO: This is planned but not yet fully implemented!**
+**TODO: This is a work in progress and not yet fully implemented!**
 
 ```shell
 rvcs merge <IDENTITY> <PATH>
@@ -130,8 +131,6 @@ demonstrate how to sign and verify signatures using SSH keys.
 
 ## Mirrors
 
-**TODO: This is planned but not yet implemented!**
-
 The rvcs tool also does not mandate a specific mechanism for copying snapshots
 between different machines, or among different users.
 
@@ -168,3 +167,6 @@ identity, and the hash of the latest, updated signature for that identity.
 
 If it successfully pushes that update to the mirror then it outputs the
 hash of the signature that was pushed and exits with a status code of `0`.
+
+There are example push and pull helpers in the `extensions` directory that
+demonstrate how to use a local file path as a mierror.
