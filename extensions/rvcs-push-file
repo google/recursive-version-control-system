@@ -1,0 +1,96 @@
+#!/bin/bash -e
+
+# Copyright 2022 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+path="${1#file://}"
+identity="${2}"
+hash="${3}"
+
+if [ -z "${path}" ]; then
+  echo "No file path provided." >&2
+  echo "Usage:" >&2
+  echo "  rvcs-push-file file://<PATH> <IDENTITY> <HASHCODE>" >&2
+  exit 1
+fi
+
+if [ -z "${identity}" ]; then
+  echo "No identity provided." >&2
+  echo "Usage:" >&2
+  echo "  rvcs-push-file file://<PATH> <IDENTITY> <HASHCODE>" >&2
+  exit 1
+fi
+
+if [ -z "${hash}" ]; then
+  echo "No snapshot hashcode provided." >&2
+  echo "Usage:" >&2
+  echo "  rvcs-push-file file://<PATH> <IDENTITY> <HASHCODE>" >&2
+  exit 1
+fi
+
+mkdir -p "${path}"
+bundleName="$(echo "${identity}" | shasum -a 256 | cut -d ' ' -f 1)-bundle.zip"
+bundlePath="${path}/${bundleName}"
+
+tempDir=$(mktemp -d)
+touch "${tempDir}/exclude.txt"
+touch "${tempDir}/previous.txt"
+if [ -f "${bundlePath}" ]; then
+  # An older version of the signature was previously pushed.
+  #
+  # Save that one off to a new location and then make sure
+  # the new bundle only includes the incremental changes since
+  # the previous bundle(s).
+
+  # ... but first, double check whether or not anything has changed...
+  prevSig="$(unzip -p "${bundlePath}" "metadata/signature" | tr -d "[:space:]")"
+  if [ "${prevSig}" == "${hash}" ]; then
+    echo -n "${hash}"
+    exit 0
+  fi
+
+  # First, move the previous bundle to its new location...
+  highest="0"
+  prefix="${bundlePath%.zip}-"
+  for prev in $(unzip -p "${bundlePath}" "metadata/previous"); do
+    suffix="${prev#${prefix}}"
+    count="${suffix%.zip}"
+    if [[ "${highest}" < "${count}" ]]; then
+      highest="${count}"
+    fi
+  done
+  replacement="${prefix}$(expr "${highest}" "+" "1").zip"
+  mv "${bundlePath}" "${replacement}"
+
+  # Next, update the excludes to include all the objects in the previous
+  # bundle...
+  additionalExcludeFiles=$(unzip -Z1 "${replacement}" objects/*)
+  for additionalExclude in ${additionalExcludeFiles}; do
+    hashAlgorithm="$(echo "${additionalExclude}" | cut -d '/' -f 2)"
+    hashContents="$(echo "${additionalExclude}" | cut -d '/' -f 3)$(echo "${additionalExclude}" | cut -d '/' -f 4)$(echo "${additionalExclude}" | cut -d '/' -f 5)"
+    echo "${hashAlgorithm}:${hashContents}" > "${tempDir}/exclude.txt"
+  done
+
+  # Then, update the previous to start with this previous bundle...
+  echo "${replacement}" > "${tempDir}/previous.txt"
+
+  # Finally, append to the excludes and previous lists everything from
+  # the previous bundle...
+  unzip -p "${replacement}" "metadata/exclude" >> "${tempDir}/exclude.txt"
+  unzip -p "${replacement}" "metadata/previous" >> "${tempDir}/previous.txt"
+fi
+
+rvcs export --exclude-from-file "${tempDir}/exclude.txt" --include-parents --snapshots="${hash}" --metadata="signature=${hash}" --metadata-from-files="exclude=${tempDir}/exclude.txt,previous=${tempDir}/previous.txt" "${bundlePath}" >&2
+rm -rf "${tempDir}"
+echo -n "${hash}"

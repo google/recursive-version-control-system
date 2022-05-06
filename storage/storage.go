@@ -18,6 +18,7 @@ package storage
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -68,6 +69,9 @@ func (s *LocalFiles) StoreObject(ctx context.Context, reader io.Reader) (h *snap
 	if err != nil {
 		return nil, fmt.Errorf("failure hashing an object: %v", err)
 	}
+	if h == nil {
+		return nil, errors.New("unexpected nil hash for an object")
+	}
 	objPath, objName := objectName(h, filepath.Join(s.ArchiveDir, "objects"))
 	if err := os.MkdirAll(objPath, os.FileMode(0700)); err != nil {
 		return nil, fmt.Errorf("failure creating the object dir for %q: %v", h, err)
@@ -89,6 +93,9 @@ func objectName(h *snapshot.Hash, parentDir string) (dir string, name string) {
 }
 
 func (s *LocalFiles) ReadObject(ctx context.Context, h *snapshot.Hash) (io.ReadCloser, error) {
+	if h == nil {
+		return nil, errors.New("there is no object associated with the nil hash")
+	}
 	objPath, objName := objectName(h, filepath.Join(s.ArchiveDir, "objects"))
 	return os.Open(filepath.Join(objPath, objName))
 }
@@ -101,6 +108,9 @@ func (s *LocalFiles) pathHashFile(p snapshot.Path) (dir string, name string, err
 	pathHash, err := snapshot.NewHash(strings.NewReader(string(p)))
 	if err != nil {
 		return "", "", fmt.Errorf("failure hashing the path name %q: %v", p, err)
+	}
+	if pathHash == nil {
+		return "", "", fmt.Errorf("unexpected nil hash for the path %q", p)
 	}
 	dir, name = objectName(pathHash, filepath.Join(s.ArchiveDir, "paths"))
 	return dir, name, nil
@@ -257,6 +267,9 @@ func (s *LocalFiles) pathCacheFile(p snapshot.Path) (dir string, name string, er
 	if err != nil {
 		return "", "", fmt.Errorf("failure hashing the path name %q: %v", p, err)
 	}
+	if pathHash == nil {
+		return "", "", fmt.Errorf("unexpected nil hash for the path %q", p)
+	}
 	dir, name = objectName(pathHash, filepath.Join(s.ArchiveDir, "cache"))
 	return dir, name, nil
 }
@@ -326,6 +339,9 @@ func (s *LocalFiles) idFile(id *snapshot.Identity) (dir string, name string, err
 	idHash, err := snapshot.NewHash(strings.NewReader(id.String()))
 	if err != nil {
 		return "", "", fmt.Errorf("failure hashing the identity %q: %v", id, err)
+	}
+	if idHash == nil {
+		return "", "", fmt.Errorf("unexpected nil hash for the identity %q", id)
 	}
 	dir, name = objectName(idHash, filepath.Join(s.ArchiveDir, "identities"))
 	return dir, name, nil
