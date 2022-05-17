@@ -32,7 +32,7 @@ type Storage interface {
 	// StoreObject persists the contents of the given reader, returning the resulting hash of those contents.
 	//
 	// This is used for persistently storing the contents of individual files.
-	StoreObject(context.Context, io.Reader) (*Hash, error)
+	StoreObject(context.Context, int64, io.Reader) (*Hash, error)
 
 	// Exclude reports whether or not the given path should be excluded from storage.
 	Exclude(Path) bool
@@ -121,7 +121,7 @@ func snapshotRegularFile(ctx context.Context, s Storage, p Path, info os.FileInf
 		}
 		s.CachePathInfo(ctx, p, info)
 	}()
-	h, err = s.StoreObject(ctx, contents)
+	h, err = s.StoreObject(ctx, info.Size(), contents)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failure storing an object: %v", err)
 	}
@@ -145,7 +145,7 @@ func snapshotDirectory(ctx context.Context, s Storage, p Path, info os.FileInfo,
 		}
 	}
 	contentsJson := []byte(childHashes.String())
-	contentsHash, err := s.StoreObject(ctx, bytes.NewReader(contentsJson))
+	contentsHash, err := s.StoreObject(ctx, int64(len(contentsJson)), bytes.NewReader(contentsJson))
 	return snapshotFileMetadata(ctx, s, p, info, contentsHash)
 }
 
@@ -155,7 +155,7 @@ func snapshotLink(ctx context.Context, s Storage, p Path, info os.FileInfo) (*Ha
 		return nil, nil, fmt.Errorf("failure reading the link target for %q: %v", p, err)
 	}
 
-	h, err := s.StoreObject(ctx, strings.NewReader(target))
+	h, err := s.StoreObject(ctx, int64(len(target)), strings.NewReader(target))
 	if err != nil {
 		return nil, nil, fmt.Errorf("failure storing an object: %v", err)
 	}

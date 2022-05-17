@@ -264,7 +264,7 @@ func Import(ctx context.Context, s *storage.LocalFiles, path string, exclude []*
 		if err != nil {
 			return nil, fmt.Errorf("failure reading entry %q: %v", f.Name, err)
 		}
-		if h, err := s.StoreObject(ctx, r); err != nil {
+		if h, err := s.StoreObject(ctx, int64(f.FileInfo().Size()), r); err != nil {
 			return nil, fmt.Errorf("failure importing the zip entry %q: %v", f.Name, err)
 		} else {
 			included = append(included, h)

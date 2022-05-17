@@ -39,7 +39,7 @@ type storageForTest struct {
 // StoreObject persists the contents of the given reader, returning the resulting hash of those contents.
 //
 // This is used for persistently storing the contents of individual files.
-func (s *storageForTest) StoreObject(ctx context.Context, reader io.Reader) (*Hash, error) {
+func (s *storageForTest) StoreObject(ctx context.Context, size int64, reader io.Reader) (*Hash, error) {
 	if s == nil {
 		return nil, fmt.Errorf("storage is not set")
 	}
@@ -91,7 +91,7 @@ func (s *storageForTest) StoreSnapshot(ctx context.Context, p Path, f *File) (*H
 	if s == nil {
 		return nil, fmt.Errorf("storage is not set")
 	}
-	h, err := s.StoreObject(ctx, strings.NewReader(f.String()))
+	h, err := s.StoreObject(ctx, int64(len(f.String())), strings.NewReader(f.String()))
 	if err != nil {
 		return nil, err
 	}

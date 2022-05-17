@@ -44,17 +44,29 @@ func (s *LocalFiles) Exclude(p snapshot.Path) bool {
 	return p == snapshot.Path(s.ArchiveDir)
 }
 
-func (s *LocalFiles) tmpFile(ctx context.Context) (*os.File, error) {
-	tmpDir := filepath.Join(s.ArchiveDir, "tmp")
+func (s *LocalFiles) tmpFile(ctx context.Context, subpath string) (*os.File, error) {
+	tmpDir := filepath.Join(s.ArchiveDir, subpath, "staging-dir")
 	if err := os.MkdirAll(tmpDir, os.FileMode(0700)); err != nil {
 		return nil, fmt.Errorf("failure creating the tmp dir: %v", err)
 	}
 	return os.CreateTemp(tmpDir, "archiver")
 }
 
-func (s *LocalFiles) StoreObject(ctx context.Context, reader io.Reader) (h *snapshot.Hash, err error) {
+func (s *LocalFiles) objectStoragePath(ctx context.Context, objectsSubDir string, h *snapshot.Hash) (filePath string, err error) {
+	objPath, objName := objectName(h, filepath.Join(s.ArchiveDir, objectsSubDir))
+	if err := os.MkdirAll(objPath, os.FileMode(0700)); err != nil {
+		return "", fmt.Errorf("failure creating the objects dir %q for %q: %v", objPath, h, err)
+	}
+	return filepath.Join(objPath, objName), nil
+}
+
+func (s *LocalFiles) StoreObject(ctx context.Context, size int64, reader io.Reader) (h *snapshot.Hash, err error) {
 	var tmp *os.File
-	tmp, err = s.tmpFile(ctx)
+	objectsSubDir := "objects"
+	if size > 1024*1024 {
+		objectsSubDir = "largeObjects"
+	}
+	tmp, err = s.tmpFile(ctx, objectsSubDir)
 	if err != nil {
 		return nil, fmt.Errorf("failure creating a temp file: %v", err)
 	}
@@ -72,12 +84,31 @@ func (s *LocalFiles) StoreObject(ctx context.Context, reader io.Reader) (h *snap
 	if h == nil {
 		return nil, errors.New("unexpected nil hash for an object")
 	}
-	objPath, objName := objectName(h, filepath.Join(s.ArchiveDir, "objects"))
-	if err := os.MkdirAll(objPath, os.FileMode(0700)); err != nil {
-		return nil, fmt.Errorf("failure creating the object dir for %q: %v", h, err)
+	storageLocation, err := s.objectStoragePath(ctx, objectsSubDir, h)
+	if err != nil {
+		return nil, fmt.Errorf("failure preparing the storage location for %q: %v", h, err)
 	}
-	if err := os.Rename(tmp.Name(), filepath.Join(objPath, objName)); err != nil {
+	if err := os.Rename(tmp.Name(), storageLocation); err != nil {
 		return nil, fmt.Errorf("failure writing the object file for %q: %v", h, err)
+	}
+	if objectsSubDir == "objects" {
+		return h, nil
+	}
+	// We wrote the contents to the `largeObjects` subdirectory instead
+	// of the `objects` subdirectory. We must also link to that location
+	// from the `objects` subdirectory so that object reads work.
+	referenceLocation, err := s.objectStoragePath(ctx, "objects", h)
+	if err != nil {
+		return nil, fmt.Errorf("failure preparing the reference location for %q: %v", h, err)
+	}
+	// `os.Symlink` fails if the link already exists, which will be
+	// the case if we've previously snapshotted the same contents,
+	// so we have to check if the link aready exists.
+	if _, err := os.Lstat(referenceLocation); err == nil {
+		return h, nil
+	}
+	if err := os.Symlink(storageLocation, referenceLocation); err != nil {
+		return nil, fmt.Errorf("failure linking the storage location %q to the reference location %q for %q: %v", storageLocation, referenceLocation, h, err)
 	}
 	return h, nil
 }
@@ -121,7 +152,7 @@ func (s *LocalFiles) StoreSnapshot(ctx context.Context, p snapshot.Path, f *snap
 		return nil, fmt.Errorf("failure creating the mapped paths dir entry for %q: %v", p, err)
 	}
 	bs := []byte(f.String())
-	h, err := s.StoreObject(ctx, bytes.NewReader(bs))
+	h, err := s.StoreObject(ctx, int64(len(bs)), bytes.NewReader(bs))
 	if err != nil {
 		return nil, fmt.Errorf("failure saving file metadata for %+v: %v", f, err)
 	}
