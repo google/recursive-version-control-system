@@ -79,7 +79,7 @@ if [ -f "${bundlePath}" ]; then
   for additionalExclude in ${additionalExcludeFiles}; do
     hashAlgorithm="$(echo "${additionalExclude}" | cut -d '/' -f 2)"
     hashContents="$(echo "${additionalExclude}" | cut -d '/' -f 3)$(echo "${additionalExclude}" | cut -d '/' -f 4)$(echo "${additionalExclude}" | cut -d '/' -f 5)"
-    echo "${hashAlgorithm}:${hashContents}" > "${tempDir}/exclude.txt"
+    echo "${hashAlgorithm}:${hashContents}" >> "${tempDir}/exclude.txt"
   done
 
   # Then, update the previous to start with this previous bundle...
