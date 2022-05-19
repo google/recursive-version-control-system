@@ -20,6 +20,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -115,5 +116,155 @@ func TestSnapshotCurrent(t *testing.T) {
 		t.Errorf("failure reading back the contents of a large file: %v", err)
 	} else if diff := cmp.Diff(string(largeBytes.Bytes()), string(readLargeBytes.Bytes())); len(diff) > 0 {
 		t.Errorf("wrong contents read back for a large file: diff %s", diff)
+	}
+}
+
+func TestDirSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	archive := filepath.Join(dir, "archive")
+	s := &LocalFiles{ArchiveDir: archive}
+
+	workingDir := filepath.Join(dir, "working-dir")
+	if err := os.Mkdir(workingDir, 0700); err != nil {
+		t.Fatalf("failure creating the working directory for the test: %v", err)
+	}
+
+	// Setup multiple levels of directory that we will snapshot
+	containerDir := filepath.Join(workingDir, "container")
+	containerPath := snapshot.Path(containerDir)
+	nestedDir := filepath.Join(containerDir, "nested")
+	nestedPath := snapshot.Path(nestedDir)
+	if err := os.MkdirAll(nestedDir, 0700); err != nil {
+		t.Fatalf("failure creating the test directories: %v", err)
+	}
+	file1 := filepath.Join(nestedDir, "example1.txt")
+	file1Path := snapshot.Path(file1)
+	file2 := filepath.Join(nestedDir, "example2.txt")
+	file2Path := snapshot.Path(file2)
+	// Take an initial snapshot
+	if err := os.WriteFile(file1, []byte("Hello, World!"), 0700); err != nil {
+		t.Fatalf("failure creating the first example file to snapshot: %v", err)
+	}
+	if err := os.WriteFile(file2, []byte("Also... hello, World!"), 0700); err != nil {
+		t.Fatalf("failure creating the second example file to snapshot: %v", err)
+	}
+	link := filepath.Join(nestedDir, "link")
+	linkPath := snapshot.Path(link)
+	if err := os.Symlink(file1, link); err != nil {
+		t.Fatalf("failure creating the example symlink to snapshot: %v", err)
+	}
+	containerHash, containerFile, err := snapshot.Current(context.Background(), s, containerPath)
+	if err != nil {
+		t.Errorf("failure creating the initial snapshot for the dir: %v", err)
+	} else if containerHash == nil {
+		t.Error("unexpected nil hash for the dir")
+	} else if containerFile == nil {
+		t.Error("unexpected nil snapshot for the dir")
+	} else if !containerFile.IsDir() {
+		t.Errorf("unexpected type for the dir snapshot: %q", containerFile.Mode)
+	}
+
+	nestedHash, nestedFile, err := snapshot.Current(context.Background(), s, nestedPath)
+	if err != nil {
+		t.Errorf("failure creating the initial snapshot for the nested dir: %v", err)
+	} else if nestedHash == nil {
+		t.Error("unexpected nil hash for the nested dir")
+	} else if nestedFile == nil {
+		t.Error("unexpected nil snapshot for the nested dir")
+	} else if !nestedFile.IsDir() {
+		t.Errorf("unexpected type for the nested dir snapshot: %q", nestedFile.Mode)
+	}
+
+	expectedTree := make(snapshot.Tree)
+	expectedTree[snapshot.Path("nested")] = nestedHash
+	expectedHash, err := snapshot.NewHash(strings.NewReader(expectedTree.String()))
+	if err != nil {
+		t.Errorf("failure hashing the expected tree: %v", err)
+	} else if got, want := containerFile.Contents, expectedHash; !got.Equal(want) {
+		t.Errorf("unexpected contents hash for the containing dir: got %q, want %q", got, want)
+	}
+
+	// Take a second snapshot and verify that it remains unchanged...
+	containerHash2, containerFile2, err := snapshot.Current(context.Background(), s, containerPath)
+	if err != nil {
+		t.Errorf("failure creating the initial snapshot for the dir: %v", err)
+	} else if got, want := containerHash2, containerHash; !got.Equal(want) {
+		t.Errorf("unexpected hash for an unchanged directory; got %q, want %q", got, want)
+	} else if got, want := containerFile2.String(), containerFile.String(); got != want {
+		t.Errorf("unexpected snapshot for an unchanged directory; got %q, want %q", got, want)
+	}
+
+	// Look up the initial snapshots for all the nested files for later checks...
+	file1Hash, file1Snapshot, err := s.FindSnapshot(context.Background(), file1Path)
+	if err != nil {
+		t.Errorf("failure looking up the snapshot for the first nested file: %v", err)
+	} else if file1Hash == nil || file1Snapshot == nil {
+		t.Errorf("missing snapshot for the first nested file: %q, %+v", file1Hash, file1Snapshot)
+	}
+	file2Hash, file2Snapshot, err := s.FindSnapshot(context.Background(), file2Path)
+	if err != nil {
+		t.Errorf("failure looking up the snapshot for the second nested file: %v", err)
+	} else if file2Hash == nil || file2Snapshot == nil {
+		t.Errorf("missing snapshot for the second nested file: %q, %+v", file2Hash, file2Snapshot)
+	}
+	linkHash, linkSnapshot, err := s.FindSnapshot(context.Background(), linkPath)
+	if err != nil {
+		t.Errorf("failure looking up the snapshot for the nested symlink: %v", err)
+	} else if linkHash == nil || linkSnapshot == nil {
+		t.Errorf("missing snapshot for the nested symlink: %q, %+v", linkHash, linkSnapshot)
+	}
+
+	// Perform a single nested update, and then re-snapshot...
+	if err := os.WriteFile(file2, []byte("Goodbye, World!"), 0700); err != nil {
+		t.Fatalf("failure updating the second example file to snapshot: %v", err)
+	}
+	containerHash3, containerFile3, err := snapshot.Current(context.Background(), s, containerPath)
+	if err != nil {
+		t.Errorf("failure creating the updated snapshot for the dir: %v", err)
+	} else if containerHash3.Equal(containerHash) {
+		t.Errorf("failed to update the hash for a nested change; got %q", containerHash3)
+	} else if containerFile3.String() == containerFile.String() {
+		t.Errorf("failed to update the snapshot for a nested change; got %+v", containerFile3)
+	}
+
+	// Compare the nested file snapshots for unchanged files to verify they are the same...
+	if file1Hash2, file1Snapshot2, err := s.FindSnapshot(context.Background(), file1Path); err != nil {
+		t.Errorf("failure looking up the snapshot for the first nested file: %v", err)
+	} else if got, want := file1Hash2, file1Hash; !got.Equal(want) {
+		t.Errorf("unexpected hash for an unchanged nested file: got %q, want %q", got, want)
+	} else if got, want := file1Snapshot2.String(), file1Snapshot.String(); got != want {
+		t.Errorf("unexpected snapshot for an unchanged nested file: got %q, want %q", got, want)
+	}
+	if linkHash2, linkSnapshot2, err := s.FindSnapshot(context.Background(), linkPath); err != nil {
+		t.Errorf("failure looking up the snapshot for the nested link: %v", err)
+	} else if got, want := linkHash2, linkHash; !got.Equal(want) {
+		t.Errorf("unexpected hash for an unchanged nested symlink: got %q, want %q", got, want)
+	} else if got, want := linkSnapshot2.String(), linkSnapshot.String(); got != want {
+		t.Errorf("unexpected snapshot for an unchanged nested symlink: got %q, want %q", got, want)
+	}
+
+	// Compare the nested file snapshot for the changed file to verify that it has been updated...
+	if file2Hash2, file2Snapshot2, err := s.FindSnapshot(context.Background(), file2Path); err != nil {
+		t.Errorf("failure looking up the snapshot for the updated nested file: %v", err)
+	} else if file2Hash2.Equal(file2Hash) {
+		t.Errorf("unexpectedly unchanged hash for a changed nested file: got %q", file2Hash2)
+	} else if file2Snapshot2.String() == file2Snapshot.String() {
+		t.Errorf("unexpectedly unchanged snapshot for a changed nested file: got %+v", file2Snapshot2)
+	}
+
+	// Remove the nested file and verify that updated snapshots are correct...
+	if err := os.Remove(file2); err != nil {
+		t.Fatalf("failure removing a nested file: %v", err)
+	}
+	containerHash4, containerFile4, err := snapshot.Current(context.Background(), s, containerPath)
+	if err != nil {
+		t.Errorf("failure creating the updated snapshot for the dir after removing a nested file: %v", err)
+	} else if containerHash4.Equal(containerHash3) {
+		t.Errorf("failed to update the hash for a nested file removal; got %q", containerHash4)
+	} else if containerFile4.String() == containerFile3.String() {
+		t.Errorf("failed to update the snapshot for a nested file removal; got %+v", containerFile4)
+	}
+	if file2Hash3, file2Snapshot3, err := s.FindSnapshot(context.Background(), file2Path); err == nil {
+		t.Errorf("unexpected hash and/or snapshot for a removed file: hash %q, snapshot %+v", file2Hash3, file2Snapshot3)
 	}
 }

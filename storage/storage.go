@@ -175,18 +175,19 @@ func (s *LocalFiles) StoreSnapshot(ctx context.Context, p snapshot.Path, f *snap
 	}
 	mappedSubPaths, err := os.ReadDir(s.mappedPathsDir(p))
 	if err != nil {
-		for _, entry := range mappedSubPaths {
-			child := snapshot.Path(entry.Name())
-			if currTree != nil {
-				if _, ok := currTree[child]; ok {
-					continue
-				}
+		return nil, fmt.Errorf("failure reading the mapped subpaths of %q: %v", p, err)
+	}
+	for _, entry := range mappedSubPaths {
+		child := snapshot.Path(entry.Name())
+		if currTree != nil {
+			if _, ok := currTree[child]; ok {
+				continue
 			}
-			// The previous child entry was removed.
-			subpath := p.Join(child)
-			if err := s.RemoveMappingForPath(ctx, subpath); err != nil {
-				return nil, fmt.Errorf("failure removing path mapping for removed child %q: %v", child, err)
-			}
+		}
+		// The previous child entry was removed.
+		subpath := p.Join(child)
+		if err := s.RemoveMappingForPath(ctx, subpath); err != nil {
+			return nil, fmt.Errorf("failure removing path mapping for removed child %q: %v", child, err)
 		}
 	}
 	return h, nil
