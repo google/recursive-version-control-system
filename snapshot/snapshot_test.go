@@ -254,6 +254,79 @@ func TestCurrentSingleFile(t *testing.T) {
 	}
 }
 
+func TestLinkSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	file1 := filepath.Join(dir, "example1.txt")
+	file2 := filepath.Join(dir, "example2.txt")
+	link := filepath.Join(dir, "link")
+	p := Path(link)
+	s := &storageForTest{}
+
+	// Take an initial snapshot
+	if err := os.WriteFile(file1, []byte("Hello, World!"), 0700); err != nil {
+		t.Fatalf("failure creating the first example file: %v", err)
+	}
+	if err := os.WriteFile(file2, []byte("Also hello, World!"), 0700); err != nil {
+		t.Fatalf("failure creating the second example file: %v", err)
+	}
+	if err := os.Symlink(file1, link); err != nil {
+		t.Fatalf("failure creating the example symlink to snapshot: %v", err)
+	}
+
+	h1, f1, err := Current(context.Background(), s, p)
+	if err != nil {
+		t.Errorf("failure creating the initial snapshot for a symlink: %v", err)
+	} else if h1 == nil {
+		t.Error("unexpected nil hash for the symlink")
+	} else if f1 == nil {
+		t.Error("unexpected nil snapshot for the symlink")
+	} else if !f1.IsLink() {
+		t.Error("unexpected snapshot type for the symlink")
+	}
+
+	// Verify that we can take the snapshot again without it changing
+	h2, f2, err := Current(context.Background(), s, p)
+	if err != nil {
+		t.Errorf("failure replicating the initial snapshot for the symlink: %v", err)
+	} else if got, want := h2, h1; !got.Equal(want) {
+		t.Errorf("unexpected hash for the symlink; got %q, want %q", got, want)
+	} else if got, want := f2.String(), f1.String(); got != want {
+		t.Errorf("unexpected snapshot for the symlink; got %q, want %q", got, want)
+	}
+
+	// Modify the contents of the linked file and verify that the snapshot of the symlink does not change
+	if err := os.WriteFile(file1, []byte("Goodbye, World!"), 0700); err != nil {
+		t.Fatalf("failure updating the contents of the example symlink target: %v", err)
+	}
+	h3, f3, err := Current(context.Background(), s, p)
+	if err != nil {
+		t.Errorf("failure replicating the initial snapshot for the symlink: %v", err)
+	} else if got, want := h3, h1; !got.Equal(want) {
+		t.Errorf("unexpected hash for the symlink; got %q, want %q", got, want)
+	} else if got, want := f3.String(), f1.String(); got != want {
+		t.Errorf("unexpected snapshot for the symlink; got %q, want %q", got, want)
+	}
+
+	if err := os.Remove(link); err != nil {
+		t.Fatalf("error removing the symlink: %v", err)
+	} else if err := os.Symlink(file2, link); err != nil {
+		t.Fatalf("error recreating the symlink: %v", err)
+	}
+
+	h4, f4, err := Current(context.Background(), s, p)
+	if err != nil {
+		t.Errorf("failure creating the updated snapshot for the symlink: %v", err)
+	} else if h4 == nil {
+		t.Error("unexpected nil hash for the updated symlink")
+	} else if f4 == nil {
+		t.Error("unexpected nil snapshot for the updated symlink")
+	} else if h4.Equal(h1) {
+		t.Error("failed to update the snapshot")
+	} else if !f4.Parents[0].Equal(h1) {
+		t.Errorf("updated snapshot did not include the original as its parent: %q", f3)
+	}
+}
+
 func TestDirSnapshot(t *testing.T) {
 	dir := t.TempDir()
 	s := &storageForTest{}
