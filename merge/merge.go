@@ -86,6 +86,12 @@ func recreateFile(ctx context.Context, s *storage.LocalFiles, h *snapshot.Hash, 
 	return nil
 }
 
+// Checkout "checks out" the given snapshot to a new file location.
+//
+// If any files already exist at the given location, they will be overwritten,
+// however, if we are checking out a directory on top of an existing directory,
+// then any existing files that are not in the checked out snapshot will be
+// ignored.
 func Checkout(ctx context.Context, s *storage.LocalFiles, h *snapshot.Hash, p snapshot.Path) error {
 	f, err := s.ReadSnapshot(ctx, h)
 	if err != nil {
@@ -104,7 +110,15 @@ func Checkout(ctx context.Context, s *storage.LocalFiles, h *snapshot.Hash, p sn
 	return nil
 }
 
-func MergeBase(ctx context.Context, s *storage.LocalFiles, lhs, rhs *snapshot.Hash) (*snapshot.Hash, error) {
+// Base identifies the "merge base" between two snapshots; the most recent
+// common ancestor of both.
+//
+// There is always a common ancestor for any two given snapshots because the
+// nil hash/snapshot is considered an ancestor for all other snapshots.
+//
+// Regardless, this method can still return an error in cases where the
+// snapshot storage is incomplete and some snapshots are missing.
+func Base(ctx context.Context, s *storage.LocalFiles, lhs, rhs *snapshot.Hash) (*snapshot.Hash, error) {
 	if lhs.Equal(rhs) {
 		return lhs, nil
 	}
@@ -141,6 +155,18 @@ func MergeBase(ctx context.Context, s *storage.LocalFiles, lhs, rhs *snapshot.Ha
 	return nil, nil
 }
 
+// Merge attempts to automatically merge the given snapshot into the local
+// filesystem at the specified destination path.
+//
+// If there are any conflicts between the specified snapshot and the local
+// filesystem contents, then the `Merge` method retursn an error without
+// modifying the local filesystem.
+//
+// In case there are no conflicts but the local storage is missing some
+// referenced snapshots, then it is possible for this method to both modify
+// the local filesystem contents *and* to also return an error. In that case
+// the previous version of the local filesystem contents will be retrievable
+// using the `rvcs log` command.
 func Merge(ctx context.Context, s *storage.LocalFiles, src *snapshot.Hash, dest snapshot.Path) error {
 	destParent := filepath.Dir(string(dest))
 	if err := os.MkdirAll(destParent, os.FileMode(0700)); err != nil {
@@ -154,7 +180,7 @@ func Merge(ctx context.Context, s *storage.LocalFiles, src *snapshot.Hash, dest 
 		// The destination does not exist; simply check out the source hash there.
 		return Checkout(ctx, s, src, dest)
 	}
-	mergeBase, err := MergeBase(ctx, s, src, destPrevHash)
+	mergeBase, err := Base(ctx, s, src, destPrevHash)
 	if err != nil {
 		return fmt.Errorf("failure determining the merge base for %q and %q: %v", src, destPrevHash, err)
 	}
