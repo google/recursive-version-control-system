@@ -24,18 +24,26 @@
 pubkey="${1#ssh::}"
 hash="${2}"
 previousSignature="${3:-}"
+outFile="${4}"
 
 if [ -z "${pubkey}" ]; then
   echo "No public key provided." >&2
   echo "Usage:" >&2
-  echo "  rvcs-sign-ssh ssh::<PUBLIC_KEY> <HASHCODE_TO_SIGN> [<HASHCODE_OF_PREVIOUS_SIGNATURE>]" >&2
+  echo "  rvcs-sign-ssh ssh::<PUBLIC_KEY> <HASHCODE_TO_SIGN> (<HASHCODE_OF_PREVIOUS_SIGNATURE> | \"\") <OUTPUT_FILE>" >&2
   exit 1
 fi
 
 if [ -z "${hash}" ]; then
   echo "No snapshot hashcode provided." >&2
   echo "Usage:" >&2
-  echo "  rvcs-sign-ssh ssh::<PUBLIC_KEY> <HASHCODE_TO_SIGN> [<HASHCODE_OF_PREVIOUS_SIGNATURE>]" >&2
+  echo "  rvcs-sign-ssh ssh::<PUBLIC_KEY> <HASHCODE_TO_SIGN> (<HASHCODE_OF_PREVIOUS_SIGNATURE> | \"\") <OUTPUT_FILE>" >&2
+  exit 1
+fi
+
+if [ -z "${outFile}" ]; then
+  echo "No output file provided." >&2
+  echo "Usage:" >&2
+  echo "  rvcs-sign-ssh ssh::<PUBLIC_KEY> <HASHCODE_TO_SIGN> (<HASHCODE_OF_PREVIOUS_SIGNATURE> | \"\") <OUTPUT_FILE>" >&2
   exit 1
 fi
 
@@ -51,5 +59,5 @@ echo "${hash}" > "${dir}/signed.txt"
 echo "${previousSignature}" >> "${dir}/signed.txt"
 rvcs snapshot --additional-parents="${hash}" "${dir}/signed.txt" >/dev/null
 ssh-keygen -q -Y sign -f "${signingKey}" -n "github.com/google/recursive-version-control-system" "${dir}/signed.txt"
-rvcs snapshot "${dir}" "--additional-parents=${previousSignature}" | cut -d " " -f 1 | tr -d "[:space:]"
+rvcs snapshot "--additional-parents=${previousSignature}" "${dir}" | cut -d " " -f 1 | tr -d "[:space:]" > "${outFile}"
 rm -rf "${dir}"

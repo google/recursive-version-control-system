@@ -16,10 +16,10 @@
 package publish
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/google/recursive-version-control-system/snapshot"
 	exec "golang.org/x/sys/execabs"
@@ -35,15 +35,27 @@ import (
 // an error.
 func runHelper(ctx context.Context, cmd, namespace string, args []string) (*snapshot.Hash, error) {
 	helperCommand := fmt.Sprintf("rvcs-%s-%s", cmd, namespace)
+	outFile, err := os.CreateTemp("", helperCommand+"*")
+	if err != nil {
+		return nil, fmt.Errorf("failure creating a temporary file for the helper command %q: %v", cmd, err)
+	}
+	defer os.Remove(outFile.Name())
+
+	args = append(args, outFile.Name())
 	helper := exec.CommandContext(ctx, helperCommand, args...)
-	var out bytes.Buffer
 	helper.Stdin = os.Stdin
-	helper.Stdout = &out
+	helper.Stdout = os.Stdout
 	helper.Stderr = os.Stderr
 	if err := helper.Run(); err != nil {
 		return nil, fmt.Errorf("failure running the helper command %q: %v", helperCommand, err)
 	}
-	h, err := snapshot.ParseHash(out.String())
+
+	out, err := os.ReadFile(outFile.Name())
+	if err != nil {
+		return nil, fmt.Errorf("failure reading the output temporary file for the helper command %q: %v", cmd, err)
+	}
+
+	h, err := snapshot.ParseHash(strings.TrimSpace(string(out)))
 	if err != nil {
 		return nil, fmt.Errorf("failure parsing the stdout of the helper %q: %v", helperCommand, err)
 	}

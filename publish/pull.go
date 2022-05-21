@@ -29,10 +29,7 @@ func pullFrom(ctx context.Context, m *config.Mirror, s *storage.LocalFiles, id *
 		return prev, nil
 	}
 	args := m.HelperFlags
-	args = append(args, m.URL.String(), id.String())
-	if prev != nil {
-		args = append(args, prev.String())
-	}
+	args = append(args, m.URL.String(), id.String(), prev.String())
 	h, err := runHelper(ctx, "pull", m.URL.Scheme, args)
 	if err != nil {
 		return nil, fmt.Errorf("failure invoking the pull helper for %q: %v", m.URL.Scheme, err)

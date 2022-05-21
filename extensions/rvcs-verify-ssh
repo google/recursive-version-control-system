@@ -23,25 +23,33 @@
 #
 # Alternatively, you can invoke this helper directly using
 #
-#    rvcs-verify-ssh ssh::<SSH_PUBLIC_KEY> <HASH_OF_SIGNATURE>
+#    rvcs-verify-ssh ssh::<SSH_PUBLIC_KEY> <HASH_OF_SIGNATURE> <OUTPUT_FILE>
 #
-# If the signature can be verified, the tool will output the hash
-# of the snapshot that was signed by it.
+# If the signature can be verified, the tool will write to the output file
+# the hash of the snapshot that was signed by it.
 
 pubkey="${1#ssh::}"
 hash="${2}"
+outFile="${3}"
 
 if [ -z "${pubkey}" ]; then
   echo "No public key provided." >&2
   echo "Usage:" >&2
-  echo "  rvcs-verify-ssh ssh::<PUBLIC_KEY> <HASHCODE_OF_SIGNATURE>" >&2
+  echo "  rvcs-verify-ssh ssh::<PUBLIC_KEY> <HASHCODE_OF_SIGNATURE> <OUTPUT_FILE>" >&2
   exit 1
 fi
 
 if [ -z "${hash}" ]; then
   echo "No signature hashcode provided." >&2
   echo "Usage:" >&2
-  echo "  rvcs-verify-ssh ssh::<PUBLIC_KEY> <HASHCODE_OF_SIGNATURE>" >&2
+  echo "  rvcs-verify-ssh ssh::<PUBLIC_KEY> <HASHCODE_OF_SIGNATURE> <OUTPUT_FILE>" >&2
+  exit 1
+fi
+
+if [ -z "${outFile}" ]; then
+  echo "No output file provided." >&2
+  echo "Usage:" >&2
+  echo "  rvcs-verify-ssh ssh::<PUBLIC_KEY> <HASHCODE_OF_SIGNATURE> <OUTPUT_FILE>" >&2
   exit 1
 fi
 
@@ -80,5 +88,5 @@ ssh-keygen -Y verify -f <(echo "${allowedSigner}") -I "${signerEmail}" -n "githu
 
 # If we got this far then the signature is fully verified and we should
 # print the hash of the signed snapshot.
-cat "${dir}/signature/signed.txt" | head -n 1 | tr -d "[:space:]"
+cat "${dir}/signature/signed.txt" | head -n 1 | tr -d "[:space:]" > "${outFile}"
 rm -rf "${dir}"

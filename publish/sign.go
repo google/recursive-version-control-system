@@ -32,10 +32,7 @@ func Sign(ctx context.Context, s *storage.LocalFiles, id *snapshot.Identity, h *
 		// Signing a nil hash is a no-op
 		return nil, nil
 	}
-	args := []string{id.String(), h.String()}
-	if prevSignature != nil {
-		args = append(args, prevSignature.String())
-	}
+	args := []string{id.String(), h.String(), prevSignature.String()}
 	h, err := runHelper(ctx, "sign", id.Algorithm(), args)
 	if err != nil {
 		return nil, fmt.Errorf("failure invoking the sign helper for %q: %v", id.Algorithm(), err)

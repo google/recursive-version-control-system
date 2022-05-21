@@ -16,18 +16,27 @@
 
 path="${1#file://}"
 identity="${2}"
+prevHash="${3}"
+outFile="${4}"
 
 if [ -z "${path}" ]; then
   echo "No file path provided." >&2
   echo "Usage:" >&2
-  echo "  rvcs-pull-file file://<PATH> <IDENTITY>" >&2
+  echo "  rvcs-pull-file file://<PATH> <IDENTITY> <PREVIOUS_HASH> <OUTPUT_FILE>" >&2
   exit 1
 fi
 
 if [ -z "${identity}" ]; then
   echo "No identity provided." >&2
   echo "Usage:" >&2
-  echo "  rvcs-pull-file file://<PATH> <IDENTITY>" >&2
+  echo "  rvcs-pull-file file://<PATH> <IDENTITY> <PREVIOUS_HASH> <OUTPUT_FILE>" >&2
+  exit 1
+fi
+
+if [ -z "${outFile}" ]; then
+  echo "No output file provided." >&2
+  echo "Usage:" >&2
+  echo "  rvcs-pull-file file://<PATH> <IDENTITY> <PREVIOUS_HASH> <OUTPUT_FILE>" >&2
   exit 1
 fi
 
@@ -39,7 +48,7 @@ if [ ! -f "${bundlePath}" ]; then
 fi
 
 rvcs import "${bundlePath}" >&2
-unzip -p "${bundlePath}" "metadata/signature" | tr -d "[:space:]"
+unzip -p "${bundlePath}" "metadata/signature" | tr -d "[:space:]" > "${outFile}"
 for previousBundle in $(unzip -p "${bundlePath}" "metadata/previous"); do
   additional=$(rvcs import -v "${previousBundle}")
   if [ "${additional}" == "" ]; then

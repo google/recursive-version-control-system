@@ -46,7 +46,7 @@ it to check out a snapshot into a new location.
 If you have the [Go tools installed](https://golang.org/doc/install), you can
 install the `rvcs` tool by running the following command:
 
-    go install github.com/google/recursive-version-control-system/rvcs@latest
+    go install github.com/google/recursive-version-control-system/cmd/...@latest
 
 Then, make sure that `${GOPATH}/bin` is in your PATH.
 
@@ -122,20 +122,21 @@ So, for example, to publish a snapshot with the identity `example::user`,
 you must have two programs in your system path named `rvcs-sign-example` and
 `rvcs-verify-example`.
 
-The sign helper takes up to three arguments; the full contents of the
+The sign helper takes four arguments; the full contents of the
 identity (e.g. `example::user` for the example above), the hash of the
-snapshot to sign, and the hash of the previous signature created for that
-identity (if any).
+snapshot to sign, the hash of the previous signature created for that
+identity (or the empty string if there is none), and a file to which it
+writes its output.
 
-If it is successful, then it outputs the hash of the snapshot of the
-generated signature to standard out and exits with a status code of `0`.
+If it is successful, then it writes to the output file the hash of the
+snapshot of the generated signature and exits with a status code of `0`.
 
-The verify helper does the reverse of that. It takes two arguments; the
-identity and the hash of the generated signature. It then
-verifies that this signature is valid for the specified identity.
+The verify helper does the reverse of that. It takes three arguments; the
+identity, the hash of the generated signature, and a file to write output.
+It then verifies that this signature is valid for the specified identity.
 
 If it is, then the verify helper outputs the hash of the signed snapshot
-to standard out and exits with a status code of `0`.
+and exits with a status code of `0`.
 
 There are example sign and verify helpers in the `extensions` directory that
 demonstrate how to sign and verify signatures using SSH keys.
@@ -167,14 +168,16 @@ So, for example, if a mirror has the URL `file:///some/local/path`, then
 rvcs will try to invoke a tool named `rvcs-push-file` to push to that mirror
 and one named `rvcs-pull-file` to pull from it.
 
-The pull helper tool takes the full URL of the mirror (including the scheme)
-and the fully specified identity (including the namespace).
+The pull helper tool takes the full URL of the mirror (including the scheme),
+the fully specified identity (including the namespace), the hash of the most
+recently-known signature for that identity, and a file for it to write output.
 
 When successfull it outputs the hash of the latest signature for that
 identity that it pulled from the mirror and exits with a status code of `0`.
 
 The push helper takes the full URL of the mirror, the fully specified
-identity, and the hash of the latest, updated signature for that identity.
+identity, the hash of the latest, updated signature for that identity, and
+a file for it to write output.
 
 If it successfully pushes that update to the mirror then it outputs the
 hash of the signature that was pushed and exits with a status code of `0`.

@@ -17,25 +17,33 @@
 path="${1#file://}"
 identity="${2}"
 hash="${3}"
+outFile="${4}"
 
 if [ -z "${path}" ]; then
   echo "No file path provided." >&2
   echo "Usage:" >&2
-  echo "  rvcs-push-file file://<PATH> <IDENTITY> <HASHCODE>" >&2
+  echo "  rvcs-push-file file://<PATH> <IDENTITY> <HASHCODE> <OUTPUT_FILE>" >&2
   exit 1
 fi
 
 if [ -z "${identity}" ]; then
   echo "No identity provided." >&2
   echo "Usage:" >&2
-  echo "  rvcs-push-file file://<PATH> <IDENTITY> <HASHCODE>" >&2
+  echo "  rvcs-push-file file://<PATH> <IDENTITY> <HASHCODE> <OUTPUT_FILE>" >&2
   exit 1
 fi
 
 if [ -z "${hash}" ]; then
   echo "No snapshot hashcode provided." >&2
   echo "Usage:" >&2
-  echo "  rvcs-push-file file://<PATH> <IDENTITY> <HASHCODE>" >&2
+  echo "  rvcs-push-file file://<PATH> <IDENTITY> <HASHCODE> <OUTPUT_FILE>" >&2
+  exit 1
+fi
+
+if [ -z "${outFile}" ]; then
+  echo "No output file provided." >&2
+  echo "Usage:" >&2
+  echo "  rvcs-push-file file://<PATH> <IDENTITY> <HASHCODE> <OUTPUT_FILE>" >&2
   exit 1
 fi
 
@@ -93,4 +101,4 @@ fi
 
 rvcs export --exclude-from-file "${tempDir}/exclude.txt" --include-parents --snapshots="${hash}" --metadata="signature=${hash}" --metadata-from-files="exclude=${tempDir}/exclude.txt,previous=${tempDir}/previous.txt" "${bundlePath}" >&2
 rm -rf "${tempDir}"
-echo -n "${hash}"
+echo -n "${hash}" > "${outFile}"
