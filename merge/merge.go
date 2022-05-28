@@ -16,143 +16,164 @@
 package merge
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/google/recursive-version-control-system/log"
 	"github.com/google/recursive-version-control-system/snapshot"
 	"github.com/google/recursive-version-control-system/storage"
 )
 
-func recreateLink(ctx context.Context, s *storage.LocalFiles, h *snapshot.Hash, f *snapshot.File, p snapshot.Path) error {
-	contentsReader, err := s.ReadObject(ctx, f.Contents)
+func IsAncestor(ctx context.Context, s *storage.LocalFiles, base, h *snapshot.Hash) (bool, error) {
+	snapshotLog, err := log.ReadLog(ctx, s, h, -1)
 	if err != nil {
-		return fmt.Errorf("failure opening the contents of the link snapshot %q: %v", h, err)
+		return false, fmt.Errorf("failure reading the log for %q: %v", h, err)
 	}
-	contents, err := io.ReadAll(contentsReader)
-	if err != nil {
-		return fmt.Errorf("failure reading the contents of the link snapshot %q: %v", h, err)
-	}
-	if err := os.Symlink(string(contents), string(p)); err != nil {
-		return fmt.Errorf("failure recreating the symling %q: %v", h, err)
-	}
-	return nil
-}
-
-func recreateDir(ctx context.Context, s *storage.LocalFiles, h *snapshot.Hash, f *snapshot.File, p snapshot.Path) error {
-	perm := f.Permissions()
-	if err := os.Mkdir(string(p), perm); err != nil {
-		return fmt.Errorf("failure creating the directory %q: %v", p, err)
-	}
-	tree, err := s.ListDirectorySnapshotContents(ctx, h, f)
-	if err != nil {
-		return fmt.Errorf("failure reading the contents of the directory snapshot %q: %v", h, err)
-	}
-	for child, childHash := range tree {
-		childPath := p.Join(child)
-		if err := Checkout(ctx, s, childHash, childPath); err != nil {
-			return fmt.Errorf("failure checking out the child path %q: %v", childPath, err)
+	for _, e := range snapshotLog {
+		if e.Hash.Equal(base) {
+			return true, nil
 		}
 	}
-	return nil
+	return false, nil
 }
 
-func recreateFile(ctx context.Context, s *storage.LocalFiles, h *snapshot.Hash, f *snapshot.File, p snapshot.Path) error {
-	if f.IsLink() {
-		return recreateLink(ctx, s, h, f, p)
+func mergeWithBase(ctx context.Context, s *storage.LocalFiles, subPath snapshot.Path, base, src, dest *snapshot.Hash, forceKeepMode bool) (*snapshot.Hash, error) {
+	// First we handle the trivial cases where the merge result should
+	// just be one of the two provided snapshots.
+	if src.Equal(dest) {
+		return src, nil
 	}
-	if f.IsDir() {
-		return recreateDir(ctx, s, h, f, p)
+	if src.Equal(base) {
+		return dest, nil
 	}
-	perm := f.Permissions()
-	contentsReader, err := s.ReadObject(ctx, f.Contents)
-	if err != nil {
-		return fmt.Errorf("failure opening the contents of the link snapshot %q: %v", h, err)
+	if dest.Equal(base) {
+		return src, nil
 	}
-	out, err := os.OpenFile(string(p), os.O_RDWR|os.O_CREATE, perm)
-	if err != nil {
-		return fmt.Errorf("failure opening the file %q: %v", p, err)
-	}
-	if _, err := io.Copy(out, contentsReader); err != nil {
-		return fmt.Errorf("failure writing the contents of %q: %v", p, err)
-	}
-	if err := out.Close(); err != nil {
-		return fmt.Errorf("failure closing the file %q: %v", p, err)
-	}
-	return nil
-}
 
-// Checkout "checks out" the given snapshot to a new file location.
-//
-// If any files already exist at the given location, they will be overwritten,
-// however, if we are checking out a directory on top of an existing directory,
-// then any existing files that are not in the checked out snapshot will be
-// ignored.
-func Checkout(ctx context.Context, s *storage.LocalFiles, h *snapshot.Hash, p snapshot.Path) error {
-	f, err := s.ReadSnapshot(ctx, h)
-	if err != nil {
-		return fmt.Errorf("failure reading the file snapshot for %q: %v", h, err)
+	// If either the source or destination do not have the base as an
+	// ancestor, then that means the changes in the base were rolled back
+	// in that version. In that case, we have to ask the user to manually
+	// merge the two versions.
+	if src == nil || dest == nil {
+		return nil, fmt.Errorf("the nested snapshot under the path %q was deleted in either the source or destination snapshot, so the two snapshots have to be manually merged", subPath)
 	}
-	if f == nil {
-		// The source file does not exist; nothing for us to do.
-		return nil
+	if isAncestor, err := IsAncestor(ctx, s, base, src); err != nil {
+		return nil, err
+	} else if !isAncestor {
+		// The changes from the base snapshot were rolled back in
+		// the source...
+		return nil, fmt.Errorf("nested changes under the path %q were rolled back in the source snapshot, so the two snapshots have to be manually merged", subPath)
 	}
-	if err := recreateFile(ctx, s, h, f, p); err != nil {
-		return fmt.Errorf("failure checking out the snapshot %q to the path %q: %v", h, p, err)
+	if isAncestor, err := IsAncestor(ctx, s, base, dest); err != nil {
+		return nil, err
+	} else if !isAncestor {
+		// The changes from the base snapshot were rolled back in
+		// the destination...
+		return nil, fmt.Errorf("nested changes under the path %q were rolled back in the destination snapshot, so the two snapshots have to be manually merged", subPath)
 	}
-	if _, err := s.StoreSnapshot(ctx, p, f); err != nil {
-		return fmt.Errorf("failure updating the snapshot for %q to %q: %v", p, h, err)
-	}
-	return nil
-}
 
-// Base identifies the "merge base" between two snapshots; the most recent
-// common ancestor of both.
-//
-// There is always a common ancestor for any two given snapshots because the
-// nil hash/snapshot is considered an ancestor for all other snapshots.
-//
-// Regardless, this method can still return an error in cases where the
-// snapshot storage is incomplete and some snapshots are missing.
-func Base(ctx context.Context, s *storage.LocalFiles, lhs, rhs *snapshot.Hash) (*snapshot.Hash, error) {
-	if lhs.Equal(rhs) {
-		return lhs, nil
-	}
-	if lhs == nil || rhs == nil {
-		return nil, nil
-	}
-	lhsLog, err := log.ReadLog(ctx, s, lhs, -1)
+	// For everything else we have to compare the actual snapshots, so
+	// we first have to read both snapshots.
+	srcFile, err := s.ReadSnapshot(ctx, src)
 	if err != nil {
-		return nil, fmt.Errorf("failure reading the log for %q: %v", lhs, err)
+		return nil, fmt.Errorf("failure reading the file snapshot for %q: %v", src, err)
 	}
-	lhsAncestors := make(map[snapshot.Hash]struct{})
-	for _, e := range lhsLog {
-		lhsAncestors[*e.Hash] = struct{}{}
-	}
-	rhsLog, err := log.ReadLog(ctx, s, rhs, -1)
+	destFile, err := s.ReadSnapshot(ctx, dest)
 	if err != nil {
-		return nil, fmt.Errorf("failure reading the log for %q: %v", rhs, err)
+		return nil, fmt.Errorf("failure reading the file snapshot for %q: %v", dest, err)
 	}
-	rhsAncestors := make(map[snapshot.Hash]struct{})
-	for _, e := range rhsLog {
-		rhsAncestors[*e.Hash] = struct{}{}
-	}
-	for len(lhsLog) > 0 && len(rhsLog) > 0 {
-		if _, ok := rhsAncestors[*lhsLog[0].Hash]; ok {
-			return lhsLog[0].Hash, nil
+	var baseFile *snapshot.File
+	if base != nil {
+		baseFile, err = s.ReadSnapshot(ctx, base)
+		if err != nil {
+			return nil, fmt.Errorf("failure reading the file snapshot for %q: %v", base, err)
 		}
-		if _, ok := lhsAncestors[*rhsLog[0].Hash]; ok {
-			return rhsLog[0].Hash, nil
-		}
-		lhsLog = lhsLog[1:]
-		rhsLog = rhsLog[1:]
 	}
-	// There are no common ancestors
-	return nil, nil
+
+	// If either the source or the destination are symbolic links, then
+	// the user has to manually merge them.
+	if srcFile.IsLink() || destFile.IsLink() {
+		return nil, fmt.Errorf("one or both versions of the snapshot at %q represent a symlink, so the two snapshots for that path have to be manually merged", subPath)
+	}
+
+	if !(srcFile.IsDir() && destFile.IsDir()) {
+		// TODO: Add support for diff3-style merges of regular files
+		return nil, fmt.Errorf("automatic merging of regular files is not yet implemented, so the two snapshots at %q have to be manually merged", subPath)
+	}
+
+	// Both source and destination are directories, so we recursively
+	// merge every nested path under either of them using the corresponding
+	// nested path from the base as a reference point.
+	srcTree, err := s.ListDirectorySnapshotContents(ctx, src, srcFile)
+	if err != nil {
+		return nil, fmt.Errorf("failure reading the tree for the snapshot %q: %v", src, err)
+	}
+	destTree, err := s.ListDirectorySnapshotContents(ctx, dest, destFile)
+	if err != nil {
+		return nil, fmt.Errorf("failure reading the tree for the snapshot %q: %v", dest, err)
+	}
+	var baseTree snapshot.Tree
+	if baseFile.IsDir() {
+		baseTree, err = s.ListDirectorySnapshotContents(ctx, base, baseFile)
+		if err != nil {
+			return nil, fmt.Errorf("failure reading the tree for the snapshot %q: %v", base, err)
+		}
+	} else {
+		// The base was a different type, so each subpath of it should
+		// just be nil
+		baseTree = make(snapshot.Tree)
+	}
+
+	mergedTree := make(snapshot.Tree)
+	subpaths := make(map[snapshot.Path]struct{})
+	for p, _ := range srcTree {
+		subpaths[p] = struct{}{}
+	}
+	for p, _ := range destTree {
+		subpaths[p] = struct{}{}
+	}
+	var nestedErrors []string
+	for p, _ := range subpaths {
+		childSubPath := subPath.Join(p)
+		childBase := baseTree[p]
+		childSrc := srcTree[p]
+		childDest := destTree[p]
+		mergedChild, err := mergeWithBase(ctx, s, childSubPath, childBase, childSrc, childDest, forceKeepMode)
+		if err != nil {
+			nestedErrors = append(nestedErrors, err.Error())
+		}
+		if mergedChild != nil {
+			mergedTree[p] = mergedChild
+		}
+	}
+	if srcFile.Mode != destFile.Mode && !forceKeepMode {
+		nestedErrors = append(nestedErrors, fmt.Sprintf("file permissions for %q do not match between versions; source mode line: %q, destination mode line %q. Manually update the permissions for the source to match what you want for the merge result, and then re-run the merge with the option to force using the source permissions", subPath, srcFile.Mode, destFile.Mode))
+	}
+	if len(nestedErrors) > 0 {
+		return nil, errors.New(strings.Join(nestedErrors, "\n"))
+	}
+
+	contentsBytes := []byte(mergedTree.String())
+	contentsHash, err := s.StoreObject(ctx, int64(len(contentsBytes)), bytes.NewReader(contentsBytes))
+	if err != nil {
+		return nil, fmt.Errorf("failure storing the contents of a merged tree: %v", err)
+	}
+	mergedFile := &snapshot.File{
+		Mode:     srcFile.Mode,
+		Contents: contentsHash,
+		Parents:  []*snapshot.Hash{src, dest},
+	}
+	fileBytes := []byte(mergedFile.String())
+	h, err := s.StoreObject(ctx, int64(len(fileBytes)), bytes.NewReader(fileBytes))
+	if err != nil {
+		return nil, fmt.Errorf("failure storing the merged snapshot: %v", err)
+	}
+	return h, nil
 }
 
 // Merge attempts to automatically merge the given snapshot into the local
@@ -188,12 +209,15 @@ func Merge(ctx context.Context, s *storage.LocalFiles, src *snapshot.Hash, dest 
 		// The source has already been merged in
 		return nil
 	}
-	if mergeBase.Equal(destPrevHash) {
-		// Simply update the destination to point to the target
-		if err := os.RemoveAll(string(dest)); err != nil {
-			return fmt.Errorf("failure updating %q to point to newer snapshot %q; failure removing old files: %v", dest, src, err)
-		}
-		return Checkout(ctx, s, src, dest)
+
+	mergedHash, err := mergeWithBase(ctx, s, dest, mergeBase, src, destPrevHash, false)
+	if err != nil {
+		return fmt.Errorf("unable to automatically merge the two snapshots: %v", err)
 	}
-	return errors.New("automatic merging into an already existing destination is not yet supported")
+
+	// Update the destination to point to the merged snapshot
+	if err := os.RemoveAll(string(dest)); err != nil {
+		return fmt.Errorf("failure updating %q to point to newer snapshot %q; failure removing old files: %v", dest, mergedHash, err)
+	}
+	return Checkout(ctx, s, mergedHash, dest)
 }
