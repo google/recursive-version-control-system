@@ -196,3 +196,82 @@ func TestMergeDir(t *testing.T) {
 	verifyFilesMatch(t, file2, filepath.Join(cloneDir, "example2.txt"))
 	verifyFilesMatch(t, file3, filepath.Join(cloneDir, "example3.txt"))
 }
+
+func TestMergeNonConflictingChangesDir(t *testing.T) {
+	dir := t.TempDir()
+	archive := filepath.Join(dir, "archive")
+	s := &storage.LocalFiles{ArchiveDir: archive}
+
+	workingDir := filepath.Join(dir, "working-dir")
+	if err := os.Mkdir(workingDir, 0700); err != nil {
+		t.Fatalf("failure creating the working directory for the test: %v", err)
+	}
+	dirPath := snapshot.Path(workingDir)
+	file1 := filepath.Join(workingDir, "example1.txt")
+	file2 := filepath.Join(workingDir, "example2.txt")
+	file3 := filepath.Join(workingDir, "example3.txt")
+
+	if err := os.WriteFile(file1, []byte("Hello, World 1!"), 0700); err != nil {
+		t.Fatalf("failure creating the example file 1: %v", err)
+	}
+	if err := os.WriteFile(file2, []byte("Hello, World 2!"), 0700); err != nil {
+		t.Fatalf("failure creating the example file 2: %v", err)
+	}
+	if err := os.WriteFile(file3, []byte("Hello, World 3!"), 0700); err != nil {
+		t.Fatalf("failure creating the example file 3: %v", err)
+	}
+
+	h1, f1, err := snapshot.Current(context.Background(), s, dirPath)
+	if err != nil {
+		t.Fatalf("failure creating the initial snapshot for the directory: %v", err)
+	} else if h1 == nil {
+		t.Fatalf("unexpected nil hash for the directory")
+	} else if f1 == nil {
+		t.Fatalf("unexpected nil snapshot for the directory")
+	}
+
+	cloneDir := filepath.Join(dir, "clone-dir")
+	cloneDirPath := snapshot.Path(cloneDir)
+	if err := Merge(context.Background(), s, h1, cloneDirPath); err != nil {
+		t.Fatalf("failure checking out the directory snapshot %q: %v", h1, err)
+	}
+	verifyFilesMatch(t, file1, filepath.Join(cloneDir, "example1.txt"))
+	verifyFilesMatch(t, file2, filepath.Join(cloneDir, "example2.txt"))
+	verifyFilesMatch(t, file3, filepath.Join(cloneDir, "example3.txt"))
+
+	if err := os.WriteFile(file1, []byte("Hello, World 1, v2!"), 0700); err != nil {
+		t.Fatalf("failure updating the example file 1: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cloneDir, "example2.txt"), []byte("Hello, World 2, v2!"), 0700); err != nil {
+		t.Fatalf("failure updating the example file 2: %v", err)
+	}
+
+	h2, f2, err := snapshot.Current(context.Background(), s, dirPath)
+	if err != nil {
+		t.Fatalf("failure creating the updated snapshot for the directory: %v", err)
+	} else if h2 == nil {
+		t.Fatalf("unexpected nil hash for the directory")
+	} else if f2 == nil {
+		t.Fatalf("unexpected nil snapshot for the directory")
+	}
+	h3, f3, err := snapshot.Current(context.Background(), s, cloneDirPath)
+	if err != nil {
+		t.Fatalf("failure creating the updated snapshot for the cloned directory: %v", err)
+	} else if h3 == nil {
+		t.Fatalf("unexpected nil hash for the directory")
+	} else if f3 == nil {
+		t.Fatalf("unexpected nil snapshot for the directory")
+	}
+
+	mergeDir := filepath.Join(dir, "merge-dir")
+	mergeDirPath := snapshot.Path(mergeDir)
+	if err := Checkout(context.Background(), s, h2, mergeDirPath); err != nil {
+		t.Fatalf("failure checking out the directory snapshot %q: %v", h2, err)
+	}
+	if err := Merge(context.Background(), s, h3, mergeDirPath); err != nil {
+		t.Fatalf("failure checking out the directory snapshot %q: %v", h1, err)
+	}
+	verifyFilesMatch(t, file1, filepath.Join(mergeDir, "example1.txt"))
+	verifyFilesMatch(t, filepath.Join(cloneDir, "example2.txt"), filepath.Join(mergeDir, "example2.txt"))
+	verifyFilesMatch(t, file3, filepath.Join(mergeDir, "example3.txt"))
+}
