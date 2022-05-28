@@ -32,14 +32,19 @@ your entire file system.
 
 This is *experimental* and very much a work-in-progress.
 
-The only functionality fully implemented so far is the `snapshot` command.
+In particular, the tool is still subject to change and there is no guarantee
+of backwards compatibility.
+
+The `snapshot` command is fully implemented, and no changes are currently
+planned for it, but that is subject to change.
 
 The `publish` command is implemented but needs more testing. Additionally,
 you have to provide helper commands in order to use it, but there are proof
 of concept helpers provided in the `extensions` directory.
 
 The `merge` command is only implemented to the point of being able to use
-it to check out a snapshot into a new location.
+it to check out a snapshot into a new location, or to automatically merge
+non-conflicting (at the level of not affecting the same file) changes.
 
 ## Installation
 
