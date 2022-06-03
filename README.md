@@ -28,6 +28,81 @@ The recursive nature of the history tracking means that you can use the same
 tool for tracking the history of a single file, an entire directory, or even
 your entire file system.
 
+## Usage
+
+Snapshot the current contents of a file:
+
+```shell
+rvcs snapshot <PATH>
+```
+
+Publish the most recent snapshot of a file by signing it:
+
+```shell
+rvcs publish <PATH> <IDENTITY>
+```
+
+Merge in changes from the most recent snapshot signed by someone:
+
+```shell
+rvcs merge <IDENTITY> <PATH>
+```
+
+## Getting Started
+
+### Installation
+
+If you have the [Go tools installed](https://golang.org/doc/install), you can
+install the `rvcs` tool by running the following command:
+
+    go install github.com/google/recursive-version-control-system/cmd/...@latest
+
+Then, make sure that `${GOPATH}/bin` is in your PATH.
+
+Optionally, you can also copy the files from the `extensions` directory into some directory in your PATH to use them for publishing snapshots.
+
+### Example Setup And Usage
+
+The `extensions` directory includes helpers for using SSH public keys as
+identities and local filesystem paths as mirrors. So, if you have them
+installed then you can set up an example identity and mirror using the
+following commands:
+
+Add a mirror for an identity (see the section on `Mirrors` below for
+more details about supported mirror URLs):
+
+```shell
+ssh-keygen -t ed25519 -f ~/.ssh/rvcs_example -C "Example identity for RVCS"
+export RVCS_EXAMPLE_IDENTITY="ssh::$(cat ~/.ssh/rvcs_example.pub | cut -d ' ' -f 2)"
+mkdir -p ${HOME}/rvcs-example/local-filesystem-mirror
+export RVCS_EXAMPLE_MIRROR="file://${HOME}/rvcs-example/local-filesystem-mirror"
+rvcs add-mirror ${RVCS_EXAMPLE_IDENTITY} ${RVCS_EXAMPLE_MIRROR}
+```
+
+Then you can publish an example directory to that identity with the following:
+
+```shell
+mkdir -p ${HOME}/rvcs-example/dir-to-publish
+echo "Hello, World\!" > ${HOME}/rvcs-example/dir-to-publish/hello.txt
+rvcs snapshot ${HOME}/rvcs-example/dir-to-publish
+rvcs publish ${HOME}/rvcs-example/dir-to-publish ${RVCS_EXAMPLE_IDENTITY}
+```
+
+If you share the local mirror (the directory you created at
+`${HOME}/rvcs-example/local-filesystem-mirror`) with another user, they
+can then retrieve your published snapshot with:
+
+```shell
+rvcs add-mirror --read-only ${RVCS_EXAMPLE_IDENTITY} ${RVCS_EXAMPLE_MIRROR}
+rvcs merge ${RVCS_EXAMPLE_IDENTITY} ~/rvcs-example-merge
+```
+
+After you are done with the example, you can clean up by removing the mirror:
+
+```shell
+rvcs remove-mirror ${RVCS_EXAMPLE_IDENTITY} ${RVCS_EXAMPLE_MIRROR}
+```
+
 ## Status
 
 This is *experimental* and very much a work-in-progress.
@@ -45,39 +120,6 @@ of concept helpers provided in the `extensions` directory.
 The `merge` command is only implemented to the point of being able to use
 it to check out a snapshot into a new location, or to automatically merge
 non-conflicting (at the level of not affecting the same file) changes.
-
-## Installation
-
-If you have the [Go tools installed](https://golang.org/doc/install), you can
-install the `rvcs` tool by running the following command:
-
-    go install github.com/google/recursive-version-control-system/cmd/...@latest
-
-Then, make sure that `${GOPATH}/bin` is in your PATH.
-
-Optionally, you can also copy the files from the `extensions` directory into some directory in your PATH to use them for publishing snapshots.
-
-## Usage
-
-Snapshot the current contents of a file:
-
-```shell
-rvcs snapshot <PATH>
-```
-
-Publish the most recent snapshot of a file by signing it:
-
-```shell
-rvcs publish <PATH> <IDENTITY>
-```
-
-Merge in changes from the most recent snapshot signed by someone:
-
-**TODO: This is a work in progress and not yet fully implemented!**
-
-```shell
-rvcs merge <IDENTITY> <PATH>
-```
 
 ## Model
 
@@ -188,4 +230,4 @@ If it successfully pushes that update to the mirror then it outputs the
 hash of the signature that was pushed and exits with a status code of `0`.
 
 There are example push and pull helpers in the `extensions` directory that
-demonstrate how to use a local file path as a mierror.
+demonstrate how to use a local file path as a mirror.

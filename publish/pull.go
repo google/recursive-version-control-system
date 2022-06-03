@@ -67,18 +67,18 @@ func Pull(ctx context.Context, settings *config.Settings, s *storage.LocalFiles,
 	}
 	for _, idSetting := range settings.Identities {
 		if idSetting.Name == id.String() {
-			for _, mirror := range idSetting.PullMirrors {
+			for _, mirror := range idSetting.Mirrors {
 				signature, signed, err = pullFromAndVerify(ctx, mirror, s, id, signature, signed)
 				if err != nil {
-					return nil, nil, fmt.Errorf("failure pulling the latest snapshot for %q from %q: %v", id, mirror, err)
+					return nil, nil, fmt.Errorf("failure pulling the latest snapshot for %q from %+v: %v", id, mirror, err)
 				}
 			}
 		}
 	}
-	for _, mirror := range settings.AdditionalPullMirrors {
+	for _, mirror := range settings.AdditionalMirrors {
 		signature, signed, err = pullFromAndVerify(ctx, mirror, s, id, signature, signed)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failure pulling the latest snapshot for %q from %q: %v", id, mirror, err)
+			return nil, nil, fmt.Errorf("failure pulling the latest snapshot for %q from %+v: %v", id, mirror, err)
 		}
 	}
 	if signature == nil {

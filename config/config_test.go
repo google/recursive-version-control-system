@@ -36,17 +36,17 @@ func TestParseSettings(t *testing.T) {
 		},
 		{
 			Description: "Empty top-level fields",
-			Serialized:  "{\"Identities\": [], \"AdditionalPullMirrors\": []}",
+			Serialized:  "{\"Identities\": [], \"AdditionalMirrors\": []}",
 			Want: &Settings{
-				Identities:            []*Identity{},
-				AdditionalPullMirrors: []*Mirror{},
+				Identities:        []*Identity{},
+				AdditionalMirrors: []*Mirror{},
 			},
 		},
 		{
 			Description: "Non-empty mirrors",
-			Serialized:  "{\"AdditionalPullMirrors\": [{\"url\": \"gcs://example.com/some-path\", \"helperFlags\": [\"--foo\", \"--bar\"]}]}",
+			Serialized:  "{\"AdditionalMirrors\": [{\"url\": \"gcs://example.com/some-path\", \"helperFlags\": [\"--foo\", \"--bar\"], \"readOnly\": true}]}",
 			Want: &Settings{
-				AdditionalPullMirrors: []*Mirror{
+				AdditionalMirrors: []*Mirror{
 					&Mirror{
 						URL: &url.URL{
 							Scheme: "gcs",
@@ -57,6 +57,7 @@ func TestParseSettings(t *testing.T) {
 							"--foo",
 							"--bar",
 						},
+						ReadOnly: true,
 					},
 				},
 			},

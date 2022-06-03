@@ -33,23 +33,27 @@ type command func(context.Context, *storage.LocalFiles, string, []string) (int, 
 
 var (
 	commandMap = map[string]command{
-		"export":   exportCommand,
-		"import":   importCommand,
-		"log":      logCommand,
-		"merge":    mergeCommand,
-		"publish":  publishCommand,
-		"snapshot": snapshotCommand,
+		"add-mirror":    addMirrorCommand,
+		"export":        exportCommand,
+		"import":        importCommand,
+		"log":           logCommand,
+		"merge":         mergeCommand,
+		"publish":       publishCommand,
+		"remove-mirror": removeMirrorCommand,
+		"snapshot":      snapshotCommand,
 	}
 
 	usage = `Usage: %s <SUBCOMMAND>
 
 Where <SUBCOMMAND> is one of:
 
+	add-mirror
 	export
 	import
 	log
 	merge
 	publish
+	remove-mirror
 	snapshot
 `
 )
