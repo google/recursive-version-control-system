@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/google/recursive-version-control-system/snapshot"
 	"github.com/google/recursive-version-control-system/storage"
@@ -179,6 +180,10 @@ func Checkout(ctx context.Context, s *storage.LocalFiles, h *snapshot.Hash, p sn
 	if f == nil {
 		// The source file does not exist; nothing for us to do.
 		return nil
+	}
+	parent := filepath.Dir(string(p))
+	if err := os.MkdirAll(parent, os.FileMode(0700)); err != nil {
+		return fmt.Errorf("failure ensuring the parent directory of %q exists: %v", p, err)
 	}
 	if err := recreateFile(ctx, s, h, f, p); err != nil {
 		return fmt.Errorf("failure checking out the snapshot %q to the path %q: %v", h, p, err)

@@ -68,9 +68,6 @@ identities and local filesystem paths as mirrors. So, if you have them
 installed then you can set up an example identity and mirror using the
 following commands:
 
-Add a mirror for an identity (see the section on `Mirrors` below for
-more details about supported mirror URLs):
-
 ```shell
 ssh-keygen -t ed25519 -f ~/.ssh/rvcs_example -C "Example identity for RVCS"
 export RVCS_EXAMPLE_IDENTITY="ssh::$(cat ~/.ssh/rvcs_example.pub | cut -d ' ' -f 2)"

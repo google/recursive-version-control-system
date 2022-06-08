@@ -102,8 +102,7 @@ func mergeWithBase(ctx context.Context, s *storage.LocalFiles, subPath snapshot.
 	}
 
 	if !(srcFile.IsDir() && destFile.IsDir()) {
-		// TODO: Add support for diff3-style merges of regular files
-		return nil, fmt.Errorf("automatic merging of regular files is not yet implemented, so the two snapshots at %q have to be manually merged", subPath)
+		return mergeWithHelper(ctx, s, subPath, destFile.Mode, base, src, dest)
 	}
 
 	// Both source and destination are directories, so we recursively
