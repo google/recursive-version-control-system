@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"time"
 
 	"github.com/google/recursive-version-control-system/snapshot"
@@ -58,7 +59,22 @@ func mergeWithHelper(ctx context.Context, s *storage.LocalFiles, p snapshot.Path
 		return nil, fmt.Errorf("failure checking out %q to a temporary path for the merge helper: %v", src, err)
 	}
 	basePath := tmpPath.Join(snapshot.Path("base")).Join(p)
-	if err := Checkout(ctx, s, base, basePath); err != nil {
+	if base == nil {
+		// Simply create an empty file to serve as the merge base.
+		//
+		// With the default merge helper of `diff3`, this will always
+		// result in unresolvable conflicts, but the user might have
+		// configured a more intelligent merge helper that knows how
+		// to resolve some cases of this, so we give it a chance to
+		// try.
+		parent := filepath.Dir(string(basePath))
+		if err := os.MkdirAll(parent, os.FileMode(0700)); err != nil {
+			return nil, fmt.Errorf("failure ensuring the parent directory of %q exists: %v", basePath, err)
+		}
+		if _, err := os.Create(string(basePath)); err != nil {
+			return nil, fmt.Errorf("failure creating an empty temporary file to serve as the merge base for the merge helper: %v", err)
+		}
+	} else if err := Checkout(ctx, s, base, basePath); err != nil {
 		return nil, fmt.Errorf("failure checking out %q to a temporary path for the merge helper: %v", base, err)
 	}
 	destPath := tmpPath.Join(snapshot.Path("dest")).Join(p)

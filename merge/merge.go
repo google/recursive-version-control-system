@@ -30,6 +30,10 @@ import (
 )
 
 func IsAncestor(ctx context.Context, s *storage.LocalFiles, base, h *snapshot.Hash) (bool, error) {
+	if base == nil {
+		// The nil snapshot is an ancestor of all other snapshots.
+		return true, nil
+	}
 	snapshotLog, err := log.ReadLog(ctx, s, h, -1)
 	if err != nil {
 		return false, fmt.Errorf("failure reading the log for %q: %v", h, err)

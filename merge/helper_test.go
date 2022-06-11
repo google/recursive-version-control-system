@@ -78,7 +78,7 @@ func TestMergeWithHelperNoConflict(t *testing.T) {
 
 	h4, err := mergeWithHelper(context.Background(), s, originalPath, "-rwx------", h1, h2, h3)
 	if err != nil {
-		t.Errorf("failure merging non-conflicting changes with the helper: %v", err)
+		t.Fatalf("failure merging non-conflicting changes with the helper: %v", err)
 	}
 
 	merged := filepath.Join(dir, "merged.txt")
@@ -92,5 +92,44 @@ func TestMergeWithHelperNoConflict(t *testing.T) {
 	}
 	if got, want := string(mergedBytes), "A\nX\nB\nY\nC\nZ\nD\nE\n"; got != want {
 		t.Errorf("unexpected results of merging non-conflicting changes with the helper: got %q, want %q", got, want)
+	}
+}
+
+func TestMergeWithHelperNilBaseNoConflict(t *testing.T) {
+	dir := t.TempDir()
+	archive := filepath.Join(dir, "archive")
+	s := &storage.LocalFiles{ArchiveDir: archive}
+
+	original := filepath.Join(dir, "original.txt")
+	originalPath := snapshot.Path(original)
+
+	version1 := filepath.Join(dir, "version1.txt")
+	version1Path := snapshot.Path(version1)
+	if err := os.WriteFile(version1, []byte("A\nB\nC\nD\nE\n"), 0700); err != nil {
+		t.Fatalf("failure writing the first version of the example file to snapshot: %v", err)
+	}
+	v1Hash, _, err := snapshot.Current(context.Background(), s, version1Path)
+	if err != nil {
+		t.Fatalf("failure creating the first updated snapshot for the file: %v", err)
+	} else if v1Hash == nil {
+		t.Fatalf("unexpected nil hash for the file")
+	}
+
+	version2 := filepath.Join(dir, "version2.txt")
+	version2Path := snapshot.Path(version2)
+	if err := os.WriteFile(version2, []byte("A\nB\nC\nD\nE\n"), 0700); err != nil {
+		t.Fatalf("failure writing the second version of the example file to snapshot: %v", err)
+	}
+	v2Hash, _, err := snapshot.Current(context.Background(), s, version2Path)
+	if err != nil {
+		t.Fatalf("failure creating the second updated snapshot for the file: %v", err)
+	} else if v2Hash == nil {
+		t.Fatalf("unexpected nil hash for the file")
+	}
+
+	if mergedHash, err := mergeWithHelper(context.Background(), s, originalPath, "-rwx------", nil, v1Hash, v2Hash); err == nil {
+		t.Errorf("unexpected result from merging unrelated files with the default merge helper: %v", mergedHash)
+	} else if got, want := err.Error(), "merge helper \"diff3\" failed: exit status 1"; got != want {
+		t.Errorf("unexexpected error message from merging unrelated files with the default merge helper: got %q, want %q", got, want)
 	}
 }
