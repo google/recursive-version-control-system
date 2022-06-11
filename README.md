@@ -110,13 +110,12 @@ of backwards compatibility.
 The `snapshot` command is fully implemented, and no changes are currently
 planned for it, but that is subject to change.
 
-The `publish` command is implemented but needs more testing. Additionally,
-you have to provide helper commands in order to use it, but there are proof
-of concept helpers provided in the `extensions` directory.
+The `publish` and `merge` commands are both implemented, but rely on external
+helper commands in order to actually use them.
 
-The `merge` command is only implemented to the point of being able to use
-it to check out a snapshot into a new location, or to automatically merge
-non-conflicting (at the level of not affecting the same file) changes.
+The `merge` command defaults to using the widely-available `diff3` command if
+no helper is provided. For the `publish` command, there are proof of concept
+helpers provided in the `extensions` directory.
 
 ## Model
 
@@ -228,3 +227,91 @@ hash of the signature that was pushed and exits with a status code of `0`.
 
 There are example push and pull helpers in the `extensions` directory that
 demonstrate how to use a local file path as a mirror.
+
+## Merging
+
+The `rvcs` provides a `merge` subcommand to automatically merge different
+snapshots together and then checkout the result into some local file path.
+
+The `merge` command takes two arguments, the "left hand side" of the merge
+and the "right hand side".
+
+The left hand side can be any type of reference to a snapshot, while the
+right hand side must be a local file system path.
+
+If the merge is successful, then the file system contents of the path
+provided for the right hand side are updated to match the merged snapshot.
+
+### Merge Helpers
+
+The `rvcs` tool will do its best to automatically merge changes to directories,
+but if there are conflicting changes to individual files it relies on an
+external helper command to try to automatically merge them.
+
+By default, it uses the `diff3` command to perform this merge. That can be
+changed by specifying the name of the command to use in the
+`RVCS_MERGE_HELPER_COMMAND` environment variable.
+
+If the supplied merge helper requires extra arguments, then they can be
+specified in a JSON-encoded list using the `RVCS_MERGE_HELPER_ARGS` environment
+variable.
+
+The `rvcs` tool invokes the specified merge helper with the specified args,
+followed by the paths to three files:
+
+1. A file with the same contents and history as the left-hand side of the
+   merge.
+2. A file with the same contents and history as the most recent common
+   ancestor of both sides of the merge.
+3. A file with the same contents and history as the right-hand side of the
+   merge.
+
+If the merge helper exits with a status of `0`, then its standard output is
+taken as the contents of the successfully-merged file.
+
+Otherwise, the automatic merge fails and you have to manually merge the
+changes.
+
+### Manual Merges
+
+The `rvcs` tool enables version control for files located anywhere on your
+computer. This fact enables a workflow that we refer to as manual merging.
+
+This is the fallback that you can use to merge conflicting changes in the
+event that `rvcs` is not able to automatically merge them.
+
+To perform a manual merge you create a temporary directory where you will
+merge the conflicting versions.
+
+You then check out the right-hand-side of your conflicting merge into this
+temporary directory:
+
+```shell
+rvcs merge ${RIGHT_HAND_SIDE} ${TEMPORARY_DIRECTORY}/${FILENAME}
+```
+
+Optionally, you can also check out the left-hand-side into this same
+directory if you want to see the changes side-by-side:
+
+```shell
+rvcs merge ${LEFT_HAND_SIDE} ${TEMPORARY_DIRECTORY}/other_${FILENAME}
+```
+
+Next, you manually edit the contents of the checked out temporary file
+to look the way you want.
+
+After that you can create a manual merge of the two sides using the
+`rvcs snapshot` command with the `--additional-parents` flag:
+
+```shell
+rvcs snapshot --additional-parents=${LEFT_HAND_SIDE} ${TEMPORARY_DIRECTORY}/${FILENAME}
+```
+
+This new snapshot will have both sides of the merge as its parents, so
+you can then merge it into your destination path:
+
+```shell
+rvcs merge ${TEMPORARY_DIRECTORY}/${FILENAME} ${RIGHT_HAND_SIDE}
+```
+
+Finally, you can clean up by removing the temporary directory.
