@@ -117,6 +117,22 @@ func TestSnapshotCurrent(t *testing.T) {
 	} else if diff := cmp.Diff(string(largeBytes.Bytes()), string(readLargeBytes.Bytes())); len(diff) > 0 {
 		t.Errorf("wrong contents read back for a large file: diff %s", diff)
 	}
+
+	// Confirm that the stored large object contents are encrypted.
+	objPath, objName := objectName(f5.Contents, filepath.Join(s.ArchiveDir, largeObjectStorageDir), true)
+	if _, err := os.Stat(filepath.Join(objPath, objName)); err != nil {
+		t.Errorf("failure finding the stored object contents in the expected location: %v", err)
+	} else {
+		var readRawBytes bytes.Buffer
+		reader, err := os.Open(filepath.Join(objPath, objName))
+		if err != nil {
+			t.Errorf("failure opening the stored object contents: %v", err)
+		} else if _, err := readRawBytes.ReadFrom(reader); err != nil {
+			t.Errorf("failure reading the raw stored object contents: %v", err)
+		} else if diff := cmp.Diff(string(readRawBytes.Bytes()), string(largeBytes.Bytes())); len(diff) == 0 {
+			t.Error("failed to encrypt the large object")
+		}
+	}
 }
 
 func TestLinkSnapshot(t *testing.T) {
