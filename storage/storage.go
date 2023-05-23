@@ -198,24 +198,17 @@ func (s *LocalFiles) ReadObject(ctx context.Context, h *snapshot.Hash) (io.ReadC
 	if h == nil {
 		return nil, errors.New("there is no object associated with the nil hash")
 	}
-	largeObjLocation := filepath.Join(s.ArchiveDir, largeObjectStorageDir)
-	objPath, objName := objectName(h, largeObjLocation, true)
-	_, err := os.Stat(filepath.Join(objPath, objName))
-	if err != nil && !os.IsNotExist(err) {
-		return nil, fmt.Errorf("failure resolving the object location: %w", err)
+	objPath, objName := objectName(h, filepath.Join(s.ArchiveDir, smallObjectStorageDir), false)
+	if r, err := os.Open(filepath.Join(objPath, objName)); err == nil {
+		return r, nil
+	} else if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("failure opening the object storage location: %w", err)
 	}
-	var encrypted bool
-	if err == nil {
-		encrypted = true
-	} else {
-		objPath, objName = objectName(h, filepath.Join(s.ArchiveDir, smallObjectStorageDir), false)
-	}
+	// The object was not found in the small object storage; look in the large object storage instead...
+	objPath, objName = objectName(h, filepath.Join(s.ArchiveDir, largeObjectStorageDir), true)
 	reader, err := os.Open(filepath.Join(objPath, objName))
 	if err != nil {
 		return nil, err
-	}
-	if !encrypted {
-		return reader, nil
 	}
 	dr, err := s.decryptingReader(reader)
 	if err == nil {
