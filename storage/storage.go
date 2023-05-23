@@ -27,7 +27,15 @@ import (
 	"syscall"
 	"time"
 
+	"filippo.io/age"
+
 	"github.com/google/recursive-version-control-system/snapshot"
+)
+
+const (
+	smallObjectStorageDir = "objects"
+	largeObjectStorageDir = "largeObjects"
+	localIdentityFile     = "x25519Identity"
 )
 
 // LocalFiles implementes the `snapshot.Storage` interface using the local file system.
@@ -44,6 +52,41 @@ func (s *LocalFiles) Exclude(p snapshot.Path) bool {
 	return p == snapshot.Path(s.ArchiveDir)
 }
 
+func (s *LocalFiles) identity() (*age.X25519Identity, error) {
+	if err := os.MkdirAll(s.ArchiveDir, os.FileMode(0700)); err != nil {
+		return nil, fmt.Errorf("failure creating the archive dir: %w", err)
+	}
+	identityFile := filepath.Join(s.ArchiveDir, localIdentityFile)
+	contents, err := os.ReadFile(identityFile)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("failure reading the identity file: %w", err)
+	}
+	if err != nil {
+		// The identity does not exist yet... create it.
+		identity, err := age.GenerateX25519Identity()
+		if err != nil {
+			return nil, fmt.Errorf("failure generating an identity: %w", err)
+		}
+		if err := os.WriteFile(identityFile, []byte(identity.String()), os.FileMode(0700)); err != nil {
+			return nil, fmt.Errorf("failure writing the identity file: %w", err)
+		}
+		contents, err = os.ReadFile(identityFile)
+		if err != nil {
+			return nil, fmt.Errorf("failure reading back the written identity file: %w", err)
+		}
+	}
+	identityStr := string(contents)
+	return age.ParseX25519Identity(identityStr)
+}
+
+func (s *LocalFiles) recipient() (*age.X25519Recipient, error) {
+	identity, err := s.identity()
+	if err != nil {
+		return nil, fmt.Errorf("failure retrieving the local identity: %w", err)
+	}
+	return identity.Recipient(), nil
+}
+
 func (s *LocalFiles) tmpFile(ctx context.Context, subpath string) (*os.File, error) {
 	tmpDir := filepath.Join(s.ArchiveDir, subpath, "staging-dir")
 	if err := os.MkdirAll(tmpDir, os.FileMode(0700)); err != nil {
@@ -52,8 +95,8 @@ func (s *LocalFiles) tmpFile(ctx context.Context, subpath string) (*os.File, err
 	return os.CreateTemp(tmpDir, "archiver")
 }
 
-func (s *LocalFiles) objectStoragePath(ctx context.Context, objectsSubDir string, h *snapshot.Hash) (filePath string, err error) {
-	objPath, objName := objectName(h, filepath.Join(s.ArchiveDir, objectsSubDir))
+func (s *LocalFiles) objectStoragePath(ctx context.Context, objectsSubDir string, h *snapshot.Hash, encrypted bool) (filePath string, err error) {
+	objPath, objName := objectName(h, filepath.Join(s.ArchiveDir, objectsSubDir), encrypted)
 	if err := os.MkdirAll(objPath, os.FileMode(0700)); err != nil {
 		return "", fmt.Errorf("failure creating the objects dir %q for %q: %v", objPath, h, err)
 	}
@@ -62,21 +105,34 @@ func (s *LocalFiles) objectStoragePath(ctx context.Context, objectsSubDir string
 
 func (s *LocalFiles) StoreObject(ctx context.Context, size int64, reader io.Reader) (h *snapshot.Hash, err error) {
 	var tmp *os.File
-	objectsSubDir := "objects"
+	var encrypted bool
+	objectsSubDir := smallObjectStorageDir
 	if size > 1024*1024 {
-		objectsSubDir = "largeObjects"
+		objectsSubDir = largeObjectStorageDir
+		encrypted = true
 	}
 	tmp, err = s.tmpFile(ctx, objectsSubDir)
 	if err != nil {
 		return nil, fmt.Errorf("failure creating a temp file: %v", err)
 	}
+	var dest io.WriteCloser = tmp
+	if encrypted {
+		rvcsLocalRecipient, err := s.recipient()
+		if err != nil {
+			return nil, fmt.Errorf("failure identifying the local rvcs encryption recipient: %w", err)
+		}
+		dest, err = age.Encrypt(dest, rvcsLocalRecipient)
+		if err != nil {
+			return nil, fmt.Errorf("failure creating an encrypted writer: %v", err)
+		}
+	}
 	defer func() {
-		tmp.Close()
+		dest.Close()
 		if err != nil {
 			os.Remove(tmp.Name())
 		}
 	}()
-	reader = io.TeeReader(reader, tmp)
+	reader = io.TeeReader(reader, dest)
 	h, err = snapshot.NewHash(reader)
 	if err != nil {
 		return nil, fmt.Errorf("failure hashing an object: %v", err)
@@ -84,36 +140,22 @@ func (s *LocalFiles) StoreObject(ctx context.Context, size int64, reader io.Read
 	if h == nil {
 		return nil, errors.New("unexpected nil hash for an object")
 	}
-	storageLocation, err := s.objectStoragePath(ctx, objectsSubDir, h)
+	storageLocation, err := s.objectStoragePath(ctx, objectsSubDir, h, encrypted)
 	if err != nil {
 		return nil, fmt.Errorf("failure preparing the storage location for %q: %v", h, err)
 	}
 	if err := os.Rename(tmp.Name(), storageLocation); err != nil {
 		return nil, fmt.Errorf("failure writing the object file for %q: %v", h, err)
 	}
-	if objectsSubDir == "objects" {
-		return h, nil
-	}
-	// We wrote the contents to the `largeObjects` subdirectory instead
-	// of the `objects` subdirectory. We must also link to that location
-	// from the `objects` subdirectory so that object reads work.
-	referenceLocation, err := s.objectStoragePath(ctx, "objects", h)
-	if err != nil {
-		return nil, fmt.Errorf("failure preparing the reference location for %q: %v", h, err)
-	}
-	// `os.Symlink` fails if the link already exists, which will be
-	// the case if we've previously snapshotted the same contents,
-	// so we have to check if the link aready exists.
-	if _, err := os.Lstat(referenceLocation); err == nil {
-		return h, nil
-	}
-	if err := os.Symlink(storageLocation, referenceLocation); err != nil {
-		return nil, fmt.Errorf("failure linking the storage location %q to the reference location %q for %q: %v", storageLocation, referenceLocation, h, err)
-	}
 	return h, nil
 }
 
-func objectName(h *snapshot.Hash, parentDir string) (dir string, name string) {
+func objectName(h *snapshot.Hash, parentDir string, encrypted bool) (dir string, name string) {
+	defer func() {
+		if encrypted {
+			name += ".age"
+		}
+	}()
 	functionDir := filepath.Join(parentDir, h.Function())
 	if len(h.HexContents()) > 4 {
 		return filepath.Join(functionDir, h.HexContents()[0:2], h.HexContents()[2:4]), h.HexContents()[4:]
@@ -123,12 +165,57 @@ func objectName(h *snapshot.Hash, parentDir string) (dir string, name string) {
 	return functionDir, h.HexContents()
 }
 
+// decryptingReader extends the age-provided reader with the Close method.
+type decryptingReader struct {
+	originalReader io.ReadCloser
+	ageDecrypter   io.Reader
+}
+
+func (d *decryptingReader) Read(p []byte) (n int, err error) {
+	return d.ageDecrypter.Read(p)
+}
+
+func (d *decryptingReader) Close() error {
+	return d.originalReader.Close()
+}
+
+func (s *LocalFiles) decryptingReader(reader io.ReadCloser) (io.ReadCloser, error) {
+	identity, err := s.identity()
+	if err != nil {
+		return nil, fmt.Errorf("failure reading the local identity: %w", err)
+	}
+	dr, err := age.Decrypt(reader, identity)
+	if err != nil {
+		return nil, fmt.Errorf("failure decrypting the underlying object: %w", err)
+	}
+	return &decryptingReader{
+		originalReader: reader,
+		ageDecrypter:   dr,
+	}, nil
+}
+
 func (s *LocalFiles) ReadObject(ctx context.Context, h *snapshot.Hash) (io.ReadCloser, error) {
 	if h == nil {
 		return nil, errors.New("there is no object associated with the nil hash")
 	}
-	objPath, objName := objectName(h, filepath.Join(s.ArchiveDir, "objects"))
-	return os.Open(filepath.Join(objPath, objName))
+	objPath, objName := objectName(h, filepath.Join(s.ArchiveDir, smallObjectStorageDir), false)
+	if r, err := os.Open(filepath.Join(objPath, objName)); err == nil {
+		return r, nil
+	} else if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("failure opening the object storage location: %w", err)
+	}
+	// The object was not found in the small object storage; look in the large object storage instead...
+	objPath, objName = objectName(h, filepath.Join(s.ArchiveDir, largeObjectStorageDir), true)
+	reader, err := os.Open(filepath.Join(objPath, objName))
+	if err != nil {
+		return nil, err
+	}
+	dr, err := s.decryptingReader(reader)
+	if err == nil {
+		return dr, nil
+	}
+	reader.Close()
+	return nil, err
 }
 
 func (s *LocalFiles) mappedPathsDir(p snapshot.Path) string {
@@ -143,7 +230,7 @@ func (s *LocalFiles) pathHashFile(p snapshot.Path) (dir string, name string, err
 	if pathHash == nil {
 		return "", "", fmt.Errorf("unexpected nil hash for the path %q", p)
 	}
-	dir, name = objectName(pathHash, filepath.Join(s.ArchiveDir, "paths"))
+	dir, name = objectName(pathHash, filepath.Join(s.ArchiveDir, "paths"), false)
 	return dir, name, nil
 }
 
@@ -302,7 +389,7 @@ func (s *LocalFiles) pathCacheFile(p snapshot.Path) (dir string, name string, er
 	if pathHash == nil {
 		return "", "", fmt.Errorf("unexpected nil hash for the path %q", p)
 	}
-	dir, name = objectName(pathHash, filepath.Join(s.ArchiveDir, "cache"))
+	dir, name = objectName(pathHash, filepath.Join(s.ArchiveDir, "cache"), false)
 	return dir, name, nil
 }
 
@@ -375,7 +462,7 @@ func (s *LocalFiles) idFile(id *snapshot.Identity) (dir string, name string, err
 	if idHash == nil {
 		return "", "", fmt.Errorf("unexpected nil hash for the identity %q", id)
 	}
-	dir, name = objectName(idHash, filepath.Join(s.ArchiveDir, "identities"))
+	dir, name = objectName(idHash, filepath.Join(s.ArchiveDir, "identities"), false)
 	return dir, name, nil
 }
 
