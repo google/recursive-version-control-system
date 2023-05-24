@@ -36,6 +36,7 @@ var (
 		"add-mirror":    addMirrorCommand,
 		"export":        exportCommand,
 		"import":        importCommand,
+		"inspect":       inspectCommand,
 		"log":           logCommand,
 		"merge":         mergeCommand,
 		"publish":       publishCommand,
@@ -50,6 +51,7 @@ Where <SUBCOMMAND> is one of:
 	add-mirror
 	export
 	import
+	inspect
 	log
 	merge
 	publish

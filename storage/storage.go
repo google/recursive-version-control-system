@@ -90,7 +90,7 @@ func (s *LocalFiles) recipient() (*age.X25519Recipient, error) {
 func (s *LocalFiles) tmpFile(ctx context.Context, subpath string) (*os.File, error) {
 	tmpDir := filepath.Join(s.ArchiveDir, subpath, "staging-dir")
 	if err := os.MkdirAll(tmpDir, os.FileMode(0700)); err != nil {
-		return nil, fmt.Errorf("failure creating the tmp dir: %v", err)
+		return nil, fmt.Errorf("failure creating the tmp dir: %w", err)
 	}
 	return os.CreateTemp(tmpDir, "archiver")
 }
@@ -98,7 +98,7 @@ func (s *LocalFiles) tmpFile(ctx context.Context, subpath string) (*os.File, err
 func (s *LocalFiles) objectStoragePath(ctx context.Context, objectsSubDir string, h *snapshot.Hash, encrypted bool) (filePath string, err error) {
 	objPath, objName := objectName(h, filepath.Join(s.ArchiveDir, objectsSubDir), encrypted)
 	if err := os.MkdirAll(objPath, os.FileMode(0700)); err != nil {
-		return "", fmt.Errorf("failure creating the objects dir %q for %q: %v", objPath, h, err)
+		return "", fmt.Errorf("failure creating the objects dir %q for %q: %w", objPath, h, err)
 	}
 	return filepath.Join(objPath, objName), nil
 }
@@ -113,7 +113,7 @@ func (s *LocalFiles) StoreObject(ctx context.Context, size int64, reader io.Read
 	}
 	tmp, err = s.tmpFile(ctx, objectsSubDir)
 	if err != nil {
-		return nil, fmt.Errorf("failure creating a temp file: %v", err)
+		return nil, fmt.Errorf("failure creating a temp file: %w", err)
 	}
 	var dest io.WriteCloser = tmp
 	if encrypted {
@@ -123,7 +123,7 @@ func (s *LocalFiles) StoreObject(ctx context.Context, size int64, reader io.Read
 		}
 		dest, err = age.Encrypt(dest, rvcsLocalRecipient)
 		if err != nil {
-			return nil, fmt.Errorf("failure creating an encrypted writer: %v", err)
+			return nil, fmt.Errorf("failure creating an encrypted writer: %w", err)
 		}
 	}
 	defer func() {
@@ -135,17 +135,17 @@ func (s *LocalFiles) StoreObject(ctx context.Context, size int64, reader io.Read
 	reader = io.TeeReader(reader, dest)
 	h, err = snapshot.NewHash(reader)
 	if err != nil {
-		return nil, fmt.Errorf("failure hashing an object: %v", err)
+		return nil, fmt.Errorf("failure hashing an object: %w", err)
 	}
 	if h == nil {
 		return nil, errors.New("unexpected nil hash for an object")
 	}
 	storageLocation, err := s.objectStoragePath(ctx, objectsSubDir, h, encrypted)
 	if err != nil {
-		return nil, fmt.Errorf("failure preparing the storage location for %q: %v", h, err)
+		return nil, fmt.Errorf("failure preparing the storage location for %q: %w", h, err)
 	}
 	if err := os.Rename(tmp.Name(), storageLocation); err != nil {
-		return nil, fmt.Errorf("failure writing the object file for %q: %v", h, err)
+		return nil, fmt.Errorf("failure writing the object file for %q: %w", h, err)
 	}
 	return h, nil
 }
@@ -225,7 +225,7 @@ func (s *LocalFiles) mappedPathsDir(p snapshot.Path) string {
 func (s *LocalFiles) pathHashFile(p snapshot.Path) (dir string, name string, err error) {
 	pathHash, err := snapshot.NewHash(strings.NewReader(string(p)))
 	if err != nil {
-		return "", "", fmt.Errorf("failure hashing the path name %q: %v", p, err)
+		return "", "", fmt.Errorf("failure hashing the path name %q: %w", p, err)
 	}
 	if pathHash == nil {
 		return "", "", fmt.Errorf("unexpected nil hash for the path %q", p)
@@ -236,33 +236,33 @@ func (s *LocalFiles) pathHashFile(p snapshot.Path) (dir string, name string, err
 
 func (s *LocalFiles) StoreSnapshot(ctx context.Context, p snapshot.Path, f *snapshot.File) (*snapshot.Hash, error) {
 	if err := os.MkdirAll(s.mappedPathsDir(p), 0700); err != nil {
-		return nil, fmt.Errorf("failure creating the mapped paths dir entry for %q: %v", p, err)
+		return nil, fmt.Errorf("failure creating the mapped paths dir entry for %q: %w", p, err)
 	}
 	bs := []byte(f.String())
 	h, err := s.StoreObject(ctx, int64(len(bs)), bytes.NewReader(bs))
 	if err != nil {
-		return nil, fmt.Errorf("failure saving file metadata for %+v: %v", f, err)
+		return nil, fmt.Errorf("failure saving file metadata for %+v: %w", f, err)
 	}
 	pathHashDir, pathHashFile, err := s.pathHashFile(p)
 	if err != nil {
-		return nil, fmt.Errorf("failure calculating the path hash file location for %q: %v", p, err)
+		return nil, fmt.Errorf("failure calculating the path hash file location for %q: %w", p, err)
 	}
 	if err := os.MkdirAll(pathHashDir, 0700); err != nil {
-		return nil, fmt.Errorf("failure creating the paths dir for %q: %v", p, err)
+		return nil, fmt.Errorf("failure creating the paths dir for %q: %w", p, err)
 	}
 	if err := os.WriteFile(filepath.Join(pathHashDir, pathHashFile), []byte(h.String()), 0600); err != nil {
-		return nil, fmt.Errorf("failure writing the hash for path %q: %v", p, err)
+		return nil, fmt.Errorf("failure writing the hash for path %q: %w", p, err)
 	}
 	var currTree snapshot.Tree
 	if f.IsDir() {
 		currTree, err = s.ListDirectorySnapshotContents(ctx, h, f)
 		if err != nil {
-			return nil, fmt.Errorf("failure listing the contents of the new snapshot: %v", err)
+			return nil, fmt.Errorf("failure listing the contents of the new snapshot: %w", err)
 		}
 	}
 	mappedSubPaths, err := os.ReadDir(s.mappedPathsDir(p))
 	if err != nil {
-		return nil, fmt.Errorf("failure reading the mapped subpaths of %q: %v", p, err)
+		return nil, fmt.Errorf("failure reading the mapped subpaths of %q: %w", p, err)
 	}
 	for _, entry := range mappedSubPaths {
 		child := snapshot.Path(entry.Name())
@@ -274,7 +274,7 @@ func (s *LocalFiles) StoreSnapshot(ctx context.Context, p snapshot.Path, f *snap
 		// The previous child entry was removed.
 		subpath := p.Join(child)
 		if err := s.RemoveMappingForPath(ctx, subpath); err != nil {
-			return nil, fmt.Errorf("failure removing path mapping for removed child %q: %v", child, err)
+			return nil, fmt.Errorf("failure removing path mapping for removed child %q: %w", child, err)
 		}
 	}
 	return h, nil
@@ -283,16 +283,16 @@ func (s *LocalFiles) StoreSnapshot(ctx context.Context, p snapshot.Path, f *snap
 func (s *LocalFiles) ReadSnapshot(ctx context.Context, h *snapshot.Hash) (*snapshot.File, error) {
 	reader, err := s.ReadObject(ctx, h)
 	if err != nil {
-		return nil, fmt.Errorf("failure looking up the file snapshot for %q: %v", h, err)
+		return nil, fmt.Errorf("failure looking up the file snapshot for %q: %w", h, err)
 	}
 	defer reader.Close()
 	contents, err := io.ReadAll(reader)
 	if err != nil {
-		return nil, fmt.Errorf("failure reading file metadata from the reader: %v", err)
+		return nil, fmt.Errorf("failure reading file metadata from the reader: %w", err)
 	}
 	f, err := snapshot.ParseFile(string(contents))
 	if err != nil {
-		return nil, fmt.Errorf("failure parsing the file snapshot for %q: %v", h, err)
+		return nil, fmt.Errorf("failure parsing the file snapshot for %q: %w", h, err)
 	}
 	return f, nil
 }
@@ -300,7 +300,7 @@ func (s *LocalFiles) ReadSnapshot(ctx context.Context, h *snapshot.Hash) (*snaps
 func (s *LocalFiles) FindSnapshot(ctx context.Context, p snapshot.Path) (*snapshot.Hash, *snapshot.File, error) {
 	pathHashDir, pathHashFile, err := s.pathHashFile(p)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failure calculating the path hash file location for %q: %v", p, err)
+		return nil, nil, fmt.Errorf("failure calculating the path hash file location for %q: %w", p, err)
 	}
 	bs, err := os.ReadFile(filepath.Join(pathHashDir, pathHashFile))
 	if err != nil {
@@ -309,11 +309,11 @@ func (s *LocalFiles) FindSnapshot(ctx context.Context, p snapshot.Path) (*snapsh
 	fileHashStr := string(bs)
 	h, err := snapshot.ParseHash(fileHashStr)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failure parsing the hash %q: %v", fileHashStr, err)
+		return nil, nil, fmt.Errorf("failure parsing the hash %q: %w", fileHashStr, err)
 	}
 	f, err := s.ReadSnapshot(ctx, h)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failure reading the file snapshot for %q: %v", h, err)
+		return nil, nil, fmt.Errorf("failure reading the file snapshot for %q: %w", h, err)
 	}
 	return h, f, nil
 }
@@ -327,22 +327,22 @@ func (s *LocalFiles) ListDirectorySnapshotContents(ctx context.Context, h *snaps
 	}
 	contentsReader, err := s.ReadObject(ctx, f.Contents)
 	if err != nil {
-		return nil, fmt.Errorf("failure opening the contents of %q: %v", h, err)
+		return nil, fmt.Errorf("failure opening the contents of %q: %w", h, err)
 	}
 	contents, err := io.ReadAll(contentsReader)
 	if err != nil {
-		return nil, fmt.Errorf("failure reading the contents of %q: %v", h, err)
+		return nil, fmt.Errorf("failure reading the contents of %q: %w", h, err)
 	}
 	tree, err := snapshot.ParseTree(string(contents))
 	if err != nil {
-		return nil, fmt.Errorf("failure parsing the directory contents of the snapshot %q: %v", h, err)
+		return nil, fmt.Errorf("failure parsing the directory contents of the snapshot %q: %w", h, err)
 	}
 	return tree, nil
 }
 
 func (s *LocalFiles) RemoveMappingForPath(ctx context.Context, p snapshot.Path) error {
 	if err := os.RemoveAll(s.mappedPathsDir(p)); err != nil {
-		return fmt.Errorf("failure removing the mapped paths entry for %q: %v", p, err)
+		return fmt.Errorf("failure removing the mapped paths entry for %q: %w", p, err)
 	}
 	h, f, err := s.FindSnapshot(ctx, p)
 	if os.IsNotExist(err) {
@@ -352,23 +352,23 @@ func (s *LocalFiles) RemoveMappingForPath(ctx context.Context, p snapshot.Path) 
 	}
 	pathHashDir, pathHashFile, err := s.pathHashFile(p)
 	if err != nil {
-		return fmt.Errorf("failure calculating the path hash file location for %q: %v", p, err)
+		return fmt.Errorf("failure calculating the path hash file location for %q: %w", p, err)
 	}
 	mappingPath := filepath.Join(pathHashDir, pathHashFile)
 	if err := os.Remove(mappingPath); err != nil {
-		return fmt.Errorf("failure removing the mapping from %q to %q: %v", p, h, err)
+		return fmt.Errorf("failure removing the mapping from %q to %q: %w", p, h, err)
 	}
 	if !f.IsDir() {
 		return nil
 	}
 	tree, err := s.ListDirectorySnapshotContents(ctx, h, f)
 	if err != nil {
-		return fmt.Errorf("failure listing the contents of %q: %v", h, err)
+		return fmt.Errorf("failure listing the contents of %q: %w", h, err)
 	}
 	for child, _ := range tree {
 		childPath := p.Join(child)
 		if err := s.RemoveMappingForPath(ctx, childPath); err != nil {
-			return fmt.Errorf("failure removing mapping for the child path %q: %v", child, err)
+			return fmt.Errorf("failure removing mapping for the child path %q: %w", child, err)
 		}
 	}
 	return nil
@@ -384,7 +384,7 @@ type cachedInfo struct {
 func (s *LocalFiles) pathCacheFile(p snapshot.Path) (dir string, name string, err error) {
 	pathHash, err := snapshot.NewHash(strings.NewReader(string(p)))
 	if err != nil {
-		return "", "", fmt.Errorf("failure hashing the path name %q: %v", p, err)
+		return "", "", fmt.Errorf("failure hashing the path name %q: %w", p, err)
 	}
 	if pathHash == nil {
 		return "", "", fmt.Errorf("unexpected nil hash for the path %q", p)
@@ -406,14 +406,14 @@ func (s *LocalFiles) CachePathInfo(ctx context.Context, p snapshot.Path, info os
 
 	cacheDir, cacheFile, err := s.pathCacheFile(p)
 	if err != nil {
-		return fmt.Errorf("failure constructing the cache dir path for %q: %v", p, err)
+		return fmt.Errorf("failure constructing the cache dir path for %q: %w", p, err)
 	}
 	cachePath := filepath.Join(cacheDir, cacheFile)
 	if err := os.MkdirAll(cacheDir, 0700); err != nil {
-		return fmt.Errorf("failure creating the cache dir for %q: %v", p, err)
+		return fmt.Errorf("failure creating the cache dir for %q: %w", p, err)
 	}
 	if err := os.Remove(cachePath); !os.IsNotExist(err) {
-		return fmt.Errorf("failure removing the old cache entry for %q: %v", p, err)
+		return fmt.Errorf("failure removing the old cache entry for %q: %w", p, err)
 	}
 
 	newInfo := fmt.Sprintf("%+v", &cachedInfo{
@@ -457,7 +457,7 @@ func (s *LocalFiles) PathInfoMatchesCache(ctx context.Context, p snapshot.Path, 
 func (s *LocalFiles) idFile(id *snapshot.Identity) (dir string, name string, err error) {
 	idHash, err := snapshot.NewHash(strings.NewReader(id.String()))
 	if err != nil {
-		return "", "", fmt.Errorf("failure hashing the identity %q: %v", id, err)
+		return "", "", fmt.Errorf("failure hashing the identity %q: %w", id, err)
 	}
 	if idHash == nil {
 		return "", "", fmt.Errorf("unexpected nil hash for the identity %q", id)
@@ -469,7 +469,7 @@ func (s *LocalFiles) idFile(id *snapshot.Identity) (dir string, name string, err
 func (s *LocalFiles) LatestSignatureForIdentity(ctx context.Context, id *snapshot.Identity) (*snapshot.Hash, error) {
 	idDir, idFile, err := s.idFile(id)
 	if err != nil {
-		return nil, fmt.Errorf("failure constructing the id dir path for %q: %v", id, err)
+		return nil, fmt.Errorf("failure constructing the id dir path for %q: %w", id, err)
 	}
 	idPath := filepath.Join(idDir, idFile)
 	bs, err := os.ReadFile(idPath)
@@ -478,11 +478,11 @@ func (s *LocalFiles) LatestSignatureForIdentity(ctx context.Context, id *snapsho
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("failure reading the identity file for %q: %v", id, err)
+		return nil, fmt.Errorf("failure reading the identity file for %q: %w", id, err)
 	}
 	h, err := snapshot.ParseHash(string(bs))
 	if err != nil {
-		return nil, fmt.Errorf("failure parsing the hash for identity %q: %v", id, err)
+		return nil, fmt.Errorf("failure parsing the hash for identity %q: %w", id, err)
 	}
 	return h, nil
 }
@@ -490,16 +490,16 @@ func (s *LocalFiles) LatestSignatureForIdentity(ctx context.Context, id *snapsho
 func (s *LocalFiles) UpdateSignatureForIdentity(ctx context.Context, id *snapshot.Identity, h *snapshot.Hash) error {
 	idDir, idFile, err := s.idFile(id)
 	if err != nil {
-		return fmt.Errorf("failure constructing the id dir path for %q: %v", id, err)
+		return fmt.Errorf("failure constructing the id dir path for %q: %w", id, err)
 	}
 	idPath := filepath.Join(idDir, idFile)
 	if h == nil {
 		if err := os.Remove(idPath); !os.IsNotExist(err) {
-			return fmt.Errorf("failure removing the identity entry for %q: %v", id, err)
+			return fmt.Errorf("failure removing the identity entry for %q: %w", id, err)
 		}
 	}
 	if err := os.MkdirAll(idDir, 0700); err != nil {
-		return fmt.Errorf("failure creating the id dir for %q: %v", id, err)
+		return fmt.Errorf("failure creating the id dir for %q: %w", id, err)
 	}
 	return os.WriteFile(idPath, []byte(h.String()), 0700)
 }
