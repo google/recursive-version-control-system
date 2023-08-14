@@ -43,7 +43,7 @@ func recreateLink(ctx context.Context, s *storage.LocalFiles, h *snapshot.Hash, 
 		return fmt.Errorf("failure removing the old file at %q: %v", p, err)
 	}
 	if err := os.Symlink(string(contents), string(p)); err != nil {
-		return fmt.Errorf("failure recreating the symling %q: %v", h, err)
+		return fmt.Errorf("failure recreating the symlink %q: %v", h, err)
 	}
 	return nil
 }
